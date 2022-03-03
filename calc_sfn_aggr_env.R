@@ -7,7 +7,7 @@
 #'
 #' @return tibble, time aggregated environmental variables as mean values. Note that even precipitation is the mean hourly value of the aggregation period!!
 #'
-#' @references
+#' @importFrom (tidyverse, lubridate, tsibble)
 #'
 #' @export
 #'
@@ -44,7 +44,7 @@ calc_sfn_aggr_env <- function(sfn_object, time_aggregation = "1 hour"){
   if(time_aggregation == "1 week" ){
     env_data <- env_data %>% 
       group_by_key() %>%
-      index_by(timestamp_aggr = ~ yearweekly(.)) %>%
+      index_by(timestamp_aggr = ~ yearweek(.)) %>%
       summarise_all(~mean(.,na.rm=TRUE))
   }
   
