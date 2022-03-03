@@ -5,7 +5,7 @@
 #' @param sfn_scale tibble object, an object as the output of calc_sfn_scale()
 #' @param time_aggregation character, time aggregation as "1 hour", "3 hour", "1 day", "1 week", "1 month"
 #'
-#' @return tibble, time aggregated environmental variables as mean values. Note that even precipitation is the mean hourly value of the aggregation period!!
+#' @return tibble, time aggregated Ttranspiration as mean values.
 #'
 #' @importFrom (tidyverse, lubridate, tsibble)
 #'
