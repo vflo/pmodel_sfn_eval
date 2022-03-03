@@ -7,9 +7,6 @@
 #'
 #' @return tibble, stand aggregated transpiration
 #'
-#' @examples print("Density of water at 20 degrees C and standard atmospheric pressure:")
-#' print(calc_density_h2o(20, 101325))
-#'
 #' @references  Poyatos, R., Granda, V., Flo, V., Molowny-Horas, R., Steppe, K., 
 #' Mencuccini, M., & Martínez-Vilalta, J. (2019). SAPFLUXNET: A
 #' global database of sap flow measurements. Zenodo. https://doi.
