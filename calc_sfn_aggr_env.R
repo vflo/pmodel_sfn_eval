@@ -23,7 +23,7 @@ calc_sfn_aggr_env <- function(sfn_object, time_aggregation = "1 hour"){
                 "' is not a valid entry."))}
   
   env_data <- sfn_object %>% 
-    dplyr::select(TIMESTAMP,ta:ext_rad) %>% 
+    dplyr::select(TIMESTAMP,ta:ext_rad,swvl1:swvl4) %>% 
     unique() %>%  
     as_tsibble(index = TIMESTAMP)
   
