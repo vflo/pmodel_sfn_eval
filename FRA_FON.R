@@ -202,3 +202,7 @@ df_res%>%
   theme_classic()
 
 #He de comprobar unidades!!!! mirar bien si es gas o 
+
+
+
+

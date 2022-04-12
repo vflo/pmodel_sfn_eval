@@ -23,7 +23,11 @@ calc_sfn_aggr_E <- function(sfn_scale, time_aggregation = "1 hour"){
                 "' is not a valid entry."))}
   
   E_data <- sfn_scale %>% 
-    as_tsibble(index = TIMESTAMP)
+    mutate(TIMESTAMP = as.Date(TIMESTAMP))%>%
+    unique() %>% 
+    # mutate(key  = row_number()) %>%
+    as_tsibble(index = TIMESTAMP)# %>%
+    # dplyr::select(-key)
   
   if(time_aggregation == "3 hour" ){
     E_data <- E_data %>% 
