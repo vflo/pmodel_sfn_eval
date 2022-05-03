@@ -20,7 +20,7 @@ calc_sfn_scale <- function(sfn_object, min_basal_area = 70){
   #check if stand basal area is greater than min_basal_area. If not, stop calculation.
   ba_perc <- sfn_object$sp_basal_area_perc %>% unique() %>% sum(na.rm = TRUE) #percentage of total basal area of plants measured in SAPFLUXNET
   if(ba_perc < min_basal_area){
-    stop(paste0("The basal area of the forest stand is less than ", as.character(min_basal_area), 
+    warning(paste0("The basal area of the forest stand is less than ", as.character(min_basal_area), 
                 "%, consider reducing the minimum basal area."))}
   
   st_ba <- sfn_object$st_basal_area %>% unique() #stand basal area m2 ha-1
