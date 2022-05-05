@@ -22,11 +22,13 @@ fapar %>%
   mutate(si_long = as.numeric(si_long),
          si_lat = as.numeric(si_lat))->foo
 
-FAPAR<-dist_merge(foo, sfn_meta_site, 'si_lat', 'si_long', 'si_lat', 'si_long')
+FAPAR_reverse<-dist_merge_mod(sfn_meta_site, foo, 'si_long', 'si_lat', 'si_long', 'si_lat')
 
-foo <- FAPAR %>% dplyr::select(-c(si_long,si_lat)) %>% left_join(sfn_meta_site)
-
-FAPAR <- foo %>% dplyr::select(-si_code) %>% left_join(sfn_meta_site)
+FAPAR <- foo %>% 
+  left_join(FAPAR_reverse%>% 
+              dplyr::select(si_code, y_lat, y_long) %>% 
+              rename(si_lat = y_lat,
+                     si_long = y_long))
 
 write_csv(FAPAR, file="DATA/FAPAR_sites.csv")
 
@@ -46,10 +48,15 @@ fapar %>%
          FparLai_QC = str_sub(QC,-2,-1),
          FparLai_QC = strtoi(FparLai_QC, base = 2))->foo
 
-FAPAR<-dist_merge(foo, sfn_meta_site, 'si_lat', 'si_long', 'si_lat', 'si_long')
+FAPAR_reverse<-dist_merge_mod(sfn_meta_site, foo, 'si_long', 'si_lat', 'si_long', 'si_lat')
 
-foo <- FAPAR %>% dplyr::select(-c(si_long,si_lat)) %>% left_join(sfn_meta_site)
+FAPAR <- foo %>% 
+  dplyr::select(-QC) %>% 
+  left_join(FAPAR_reverse%>% 
+              dplyr::select(si_code, y_lat, y_long) %>% 
+              rename(si_lat = y_lat,
+                     si_long = y_long))
 
-FAPAR <- foo %>% dplyr::select(-si_code,-QC) %>% left_join(sfn_meta_site)
+
 
 write_csv(FAPAR, file="DATA/FAPAR_sites_noaa.csv")

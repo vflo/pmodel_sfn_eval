@@ -75,7 +75,7 @@ optim_swc <- function(sfn_object, psi_data, min_swc = 0, max_swc = 0.6, type = "
       b <- par[1]
       s_x <- par[2]
       psi_sfn <- sfn_swvl %>% 
-        mutate(psi_sfn = medfate::soil_psi(medfate::soil(tibble(widths = st_soil_depth*10, clay = st_clay_perc, sand = st_sand_perc, om = NA, bd = 1.6, rfc = 70), W = b * swvl+s_x), model = "VG")) %>%
+        mutate(psi_sfn = medfate::soil_psi(medfate::soil(tibble(widths = st_soil_depth*10, clay = st_clay_perc, sand = st_sand_perc, om = NA, bd = 1.6, rfc = 70), W = b * swvl+s_x), model = "SX")) %>%
         dplyr::select(TIMESTAMP, psi_sfn) %>%
         mutate(date = lubridate::date(TIMESTAMP))
     

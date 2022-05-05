@@ -1,76 +1,7 @@
-library(sapfluxnetr)
-library(rpmodel)
-library(tidyverse)
-library(lubridate)
-library(tsibble)
-library(rgdal)
-library(Metrics)
-library(ghibli)
-library(splashTools)
-library(xts)
-library(medfate)
-library(mgcv)
-library(qgam)
-source("dist_merge.R")
-
-sapply(list('calc_sfn_aggr_E.R','calc_sfn_aggr_env.R','calc_sfn_scale.R','swvl_aggregation.R','calc_optim_swc.R','do_phydro_params.R'), source, .GlobalEnv)
-
-#### LOAD SAPFLUXNET DATA ####
-path <- "../0.1.5/RData/plant"
-# sfn_meta <- sapfluxnetr::read_sfn_metadata(folder = path, .write_cache = TRUE)
-# save(sfn_meta, file = "DATA/sfn_meta.RData")
-
-#load SAPFLUXNET metadata
-load(file = "DATA/sfn_meta.RData")
-
-#create table of SFN coordinates
-sfn_meta$site_md %>% dplyr::select(si_code,si_lat,si_long) %>% write_csv(file='DATA/sfn_sites_coord.csv')
-
-#load ERA5-land swc
-# load(file = "DATA/df_hourly.RData")
-# df_swc <- df %>% 
-#   pivot_wider(names_from = variable, values_from = value, values_fn = mean) %>% 
-#   mutate(TIMESTAMP = lubridate::date(timestamp))
-# rm(df)
-# gc()
-
-load(file = "DATA/swc_ERA5_land.RData")
-df_swc <- swc_ERA5_land %>% 
-  mutate(TIMESTAMP = lubridate::date(TIMESTAMP_daylight),
-         swvl1 = swc_ERA5_land,
-         swvl2 = swc_ERA5_land,
-         swvl3 = swc_ERA5_land,
-         swvl4 = swc_ERA5_land)
-rm(swc_ERA5_land)
-gc()
-
-#load FLUXNET sites names and file names
-flx_files <- read_csv("DATA/flx_files.csv")
-
-#load PSI
-load("DATA/PSI_DF.RData")
-PSI_DF <- as_tibble(PSI_DF)
-
-#load SW ERA5
-load("DATA/sw_ERA5_18.RData")
-sw_ERA5 <- as_tibble(sw_ERA5_18)
-
-#load FAPAR
-fapar <-read_csv("DATA/FAPAR_sites.csv")
-fapar_noaa <-read_csv("DATA/FAPAR_sites_noaa.csv")
-
-#species data load
-data("SpParamsUS")
-data("SpParamsMED")
-
-SpParams <- SpParamsUS %>% bind_rows(SpParamsMED)
-
-#soil data
-load('DATA/clay.RData')
-load('DATA/sand.RData')
+source("init_SFN_MODEL_PREDICTION.R")
 
 #### MODEL CALCULATION ####
-as.list(flx_files$sfn_sites)[c(-1)] %>%
+as.list(flx_files$sfn_sites)[-c(1:157)] %>%
   purrr::map(function(x){
   #load SAPFLUXNET site and aggregation at daily level
   sfn <- read_sfn_data(x, folder = path) %>%
@@ -105,6 +36,7 @@ as.list(flx_files$sfn_sites)[c(-1)] %>%
   
   #if there is no column add it filled with NA
   if(!any(colnames(sfn) == "ws")){sfn <- sfn %>% mutate(ws = c(NA))}
+  if(!any(colnames(sfn) == "rh")){sfn <- sfn %>% mutate(rh = c(NA))}
   if(!any(colnames(sfn) == "netrad")){sfn <- sfn %>% mutate(netrad = c(NA))}
   if(!any(colnames(sfn) == "sw_in")){sfn <- sfn %>% mutate(sw_in = c(NA))}
   if(!any(colnames(sfn) == "ppfd_in")){sfn <- sfn %>% mutate(ppfd_in = c(NA))}
@@ -141,13 +73,13 @@ as.list(flx_files$sfn_sites)[c(-1)] %>%
   
   #join SW ERA5
   
-  sfn <- sfn %>% left_join(sw_ERA5) %>% mutate(sw_ERA5 = sw_ERA5_18/2) # transform into mean daily value (divide by two to account for night value)
+  sfn <- sfn %>% left_join(sw_ERA5,by = c("si_code", "TIMESTAMP_daylight")) %>% mutate(sw_ERA5 = sw_ERA5_18/2) # transform into mean daily value (divide by two to account for night value)
   
   ##CALIBRATE SOIL POTENTIAL by adding SWC
   ## THE OPTIMUM SWC value to add
-  is_psi_data <- any(unique(sfn$si_code) %in% unique(PSI_DF$id_sfn) &
-                       any(lubridate::date(PSI_DF$TIMESTAMP) %in% lubridate::date(sfn$TIMESTAMP)) & 
-                       any(PSI_DF$time_psi == "pre-dawn"))
+  psi_data_site <-  PSI_DF[PSI_DF$id_sfn == unique(sfn$si_code) & PSI_DF$time_psi == "pre-dawn",]
+  is_psi_data <- any(lubridate::date(psi_data_site$TIMESTAMP) %in% lubridate::date(sfn$TIMESTAMP)) 
+                     
   if(is_psi_data){
     opt_swc <- optim_swc(sfn, PSI_DF, type ="swc")
   }else{
@@ -177,7 +109,7 @@ as.list(flx_files$sfn_sites)[c(-1)] %>%
   
   min_data = min(fapar_filled$TIMESTAMP)
   
-  # Build the model
+  # Build FAPAR model
   model_fapar <- qgam(Fapar ~ s(TIMESTAMP, bs = 'tp', k = 180), data = fapar_filled %>% 
                  dplyr::select(TIMESTAMP,Fapar) %>% 
                  mutate(TIMESTAMP = TIMESTAMP %>% 
@@ -256,7 +188,7 @@ as.list(flx_files$sfn_sites)[c(-1)] %>%
   #### PMODEL WEEKLY ####
   #DATA preparation
   df <- sfn_aggr_week %>%
-    left_join(env_week, by = c("timestamp_aggr", "TIMESTAMP")) %>% 
+    left_join(env_week, by = c("timestamp_aggr", "TIMESTAMP")) %>%
     bind_cols(tibble(opt_swc_slope = opt_swc[1],opt_swc_int =  opt_swc[2])) %>% 
     # filter(!is.na(E_stand)) %>% 
     # filter(lubridate::date(TIMESTAMP) >= lubridate::ymd(20140101), lubridate::date(TIMESTAMP) < lubridate::ymd(20150101)) %>%
@@ -272,13 +204,13 @@ as.list(flx_files$sfn_sites)[c(-1)] %>%
                            !is.na(vpd)~ vpd),
            ta = case_when(is.na(ta)~ tc,
                           !is.na(ta)~ ta),
-           ppfd_in = case_when(is.na(ppfd_in)~ PPFD, #if there is ppfd in SFN, use if not use PPFD from EC and if not use ppfd calculated from SW from ERA5
-                               is.na(PPFD)~ ppfd_ERA5,
-                              !is.na(ppfd_in)~ ppfd_in),
+           ppfd_in = case_when(is.na(ppfd_in) & !is.na(PPFD) ~ PPFD, #if there is ppfd in SFN, use if not use PPFD from EC and if not use ppfd calculated from SW from ERA5
+                               is.na(ppfd_in) & is.na(PPFD) ~ ppfd_ERA5,
+                              !is.na(ppfd_in) ~ ppfd_in),
            netrad = case_when(is.na(netrad)~ netr,
                               !is.na(netrad)~ netrad),
            CO2 = case_when(is.na(CO2) ~ 400,
-                              !is.na(CO2) ~ CO2)) %>%
+                              !is.na(CO2) ~ CO2)) %>% 
     filter(!is.na(REW))
   
   # fit_ws <- lm(ws~0+ws_ERA, data =df) %>% summary()
@@ -334,7 +266,7 @@ as.list(flx_files$sfn_sites)[c(-1)] %>%
   
 if(PHYDRO_TRUE & opt_swc[1] != 1 & opt_swc[2] != 0){
   df %>%  
-    filter(!is.na(ta),!is.na(FAPAR),!is.na(ppfd_in),!is.na(netrad), !is.na(vpd),FAPAR > 0, ppfd_in > 0) %>%
+    filter(!is.na(ta),!is.na(FAPAR),!is.na(ppfd_in), !is.na(vpd),FAPAR > 0, ppfd_in > 0) %>%
     split(seq(nrow(.)))%>%
     purrr::map(function(x){
       print(x$timestamp_aggr)
@@ -351,40 +283,45 @@ if(PHYDRO_TRUE & opt_swc[1] != 1 & opt_swc[2] != 0){
     })%>% bind_rows()->df_Ohm
   colnames(df_Ohm)[-1] <- paste(colnames(df_Ohm[,-1]), "Ohm", sep = "_")
   
-  df %>%  
-    filter(!is.na(ta),!is.na(FAPAR),!is.na(ppfd_in),!is.na(netrad), !is.na(vpd),FAPAR > 0, ppfd_in > 0) %>%
-    split(seq(nrow(.)))%>%
-    purrr::map(function(x){
-      print(paste("PM:", x$timestamp_aggr))
-      psi_soil <- medfate::soil_psi(medfate::soil(tibble(widths = x$st_soil_depth*10, clay = x$st_clay_perc, sand = x$st_sand_perc, om = NA, bd = 1.6, rfc = 70), W =x$swvl), model = "VG")
-      if(is.na(psi_soil)){
-        psi_soil <- medfate::soil_psi(medfate::soil(tibble(widths = x$st_soil_depth*10, clay = x$st_clay_perc, sand = x$st_sand_perc, om = NA, bd = 1.6, rfc = 70), W =x$swvl), model = "SX")
-      }
-      res <- pmodel_hydraulics_numerical(tc = x$ta, ppfd =x$ppfd_in/x$LAI, vpd = x$vpd, u = x$ws, ustar=NA, nR=x$netrad, co2=x$CO2, LAI = x$LAI,
-                                         elv = x$si_elev, fapar = (x$FAPAR), 
-                                         kphio = calc_ftemp_kphio(x$ta), psi_soil = psi_soil, rdark = 0, par_plant = par_plant_std, 
-                                         par_cost = list(
-                                           alpha = 0.1,       # cost of Jmax
-                                           gamma = 1          # cost of hydraulic repair
-                                         ), 
-                                         opt_hypothesis = "PM", gs_approximation = "PM")
-      return(tibble(timestamp_aggr = x$timestamp_aggr) %>% bind_cols(res))
-    })%>% bind_rows()->df_PM
-  colnames(df_PM)[-1] <- paste(colnames(df_PM[,-1]), "PM", sep = "_")
-
-  
   df_res <- df_res %>% 
-    left_join(df_PM, by = "timestamp_aggr") %>%
     left_join(df_Ohm, by = "timestamp_aggr") %>%
-    mutate(PHydro = E_Ohm/1e6*3600*LAI , #transform to mol m-2soil h-1
-           `PHydro Penman-Monteith` = E_PM*3600*LAI#
-           # `PHydro Penman-Monteith` = E_PM*55.5*3600 *LAI#,
-           # `PHydro Penman-Monteith simple` = E_simple_PM/1e6*3600*LAI
-    )
+    mutate(PHydro = E_Ohm/1e6*3600*LAI) #transform to mol m-2soil h-1
+
+  #if there is net radiation then calculate phydro with penman monteith
+  if(any(!is.na(df$netrad))){
+    df %>%  
+      filter(!is.na(ta),!is.na(FAPAR),!is.na(ppfd_in),!is.na(netrad), !is.na(vpd),FAPAR > 0, ppfd_in > 0) %>%
+      split(seq(nrow(.)))%>%
+      purrr::map(function(x){
+        print(paste("PM:", x$timestamp_aggr))
+        psi_soil <- medfate::soil_psi(medfate::soil(tibble(widths = x$st_soil_depth*10, clay = x$st_clay_perc, sand = x$st_sand_perc, om = NA, bd = 1.6, rfc = 70), W =x$swvl), model = "VG")
+        if(is.na(psi_soil)){
+          psi_soil <- medfate::soil_psi(medfate::soil(tibble(widths = x$st_soil_depth*10, clay = x$st_clay_perc, sand = x$st_sand_perc, om = NA, bd = 1.6, rfc = 70), W =x$swvl), model = "SX")
+        }
+        res <- pmodel_hydraulics_numerical(tc = x$ta, ppfd =x$ppfd_in/x$LAI, vpd = x$vpd, u = x$ws, ustar=NA, nR=x$netrad, co2=x$CO2, LAI = x$LAI,
+                                           elv = x$si_elev, fapar = (x$FAPAR), 
+                                           kphio = calc_ftemp_kphio(x$ta), psi_soil = psi_soil, rdark = 0, par_plant = par_plant_std, 
+                                           par_cost = list(
+                                             alpha = 0.1,       # cost of Jmax
+                                             gamma = 1          # cost of hydraulic repair
+                                           ), 
+                                           opt_hypothesis = "PM", gs_approximation = "PM")
+        return(tibble(timestamp_aggr = x$timestamp_aggr) %>% bind_cols(res))
+      })%>% bind_rows()->df_PM
+    colnames(df_PM)[-1] <- paste(colnames(df_PM[,-1]), "PM", sep = "_")
+    
+    df_res <- df_res %>% 
+      left_join(df_PM, by = "timestamp_aggr") %>%
+      mutate(`PHydro Penman-Monteith` = E_PM*3600*LAI) #transform to mol m-2soil h-1
+    
+  }
+
 }
   #### SAVE DATA ####
-
-  save(df_res, file = paste0("DATA/OUTCOME_WEEKLY/",x,".RData"))
+  if(nrow(df_res)>0){
+    save(df_res, file = paste0("DATA/OUTCOME_WEEKLY/",x,".RData"))
+  }
+  
   
   
   #### PMODEL MONTHLY ####
@@ -405,9 +342,9 @@ if(PHYDRO_TRUE & opt_swc[1] != 1 & opt_swc[2] != 0){
                            !is.na(vpd)~ vpd),
            ta = case_when(is.na(ta)~ tc,
                           !is.na(ta)~ ta),
-           ppfd_in = case_when(is.na(ppfd_in)~ PPFD, #if there is ppfd in SFN, use if not use PPFD from EC and if not use ppfd calculated from SW from ERA5
-                               is.na(PPFD)~ ppfd_ERA5,
-                               !is.na(ppfd_in)~ ppfd_in),
+           ppfd_in = case_when(is.na(ppfd_in) & !is.na(PPFD) ~ PPFD, #if there is ppfd in SFN, use if not use PPFD from EC and if not use ppfd calculated from SW from ERA5
+                               is.na(ppfd_in) & is.na(PPFD) ~ ppfd_ERA5,
+                               !is.na(ppfd_in) ~ ppfd_in),
            netrad = case_when(is.na(netrad)~ netr,
                               !is.na(netrad)~ netrad),
            CO2 = case_when(is.na(CO2) ~ 400,
@@ -464,9 +401,9 @@ if(PHYDRO_TRUE & opt_swc[1] != 1 & opt_swc[2] != 0){
       )
   }  
   
-  if(PHYDRO_TRUE & opt_swc[1] != 1 & opt_swc[2] != 0){
+  if(PHYDRO_TRUE & opt_swc[1] != 1 & opt_swc[2] != 0 ){
     df %>%  
-      filter(!is.na(ta),!is.na(FAPAR),!is.na(ppfd_in),!is.na(netrad), !is.na(vpd), FAPAR > 0, ppfd_in > 0) %>%
+      filter(!is.na(ta),!is.na(FAPAR),!is.na(ppfd_in), !is.na(vpd), FAPAR > 0, ppfd_in > 0) %>%
       split(seq(nrow(.)))%>%
       purrr::map(function(x){
         print(x$timestamp_aggr)
@@ -483,42 +420,47 @@ if(PHYDRO_TRUE & opt_swc[1] != 1 & opt_swc[2] != 0){
       })%>% bind_rows()->df_Ohm
     colnames(df_Ohm)[-1] <- paste(colnames(df_Ohm[,-1]), "Ohm", sep = "_")
     
-    df %>%  
-      filter(!is.na(ta),!is.na(FAPAR),!is.na(ppfd_in),!is.na(netrad), !is.na(vpd), ppfd_in>0, FAPAR>0) %>%
-      split(seq(nrow(.)))%>%
-      purrr::map(function(x){
-        print(paste("PM:", x$timestamp_aggr))
-        psi_soil <- medfate::soil_psi(medfate::soil(tibble(widths = x$st_soil_depth*10, clay = x$st_clay_perc, sand = x$st_sand_perc, om = NA, bd = 1.6, rfc = 70), W =x$swvl), model = "VG")
-        if(is.na(psi_soil)){
-          psi_soil <- medfate::soil_psi(medfate::soil(tibble(widths = x$st_soil_depth*10, clay = x$st_clay_perc, sand = x$st_sand_perc, om = NA, bd = 1.6, rfc = 70), W =x$swvl), model = "SX")
-        }
-        res <- pmodel_hydraulics_numerical(tc = x$ta, ppfd =x$ppfd_in/x$LAI, vpd = x$vpd, u = x$ws, ustar=NA, nR=x$netrad, co2=x$CO2, LAI = x$LAI,
-                                           elv = x$si_elev, fapar = (x$FAPAR), 
-                                           kphio = calc_ftemp_kphio(x$ta), psi_soil = psi_soil, rdark = 0, par_plant = par_plant_std, 
-                                           par_cost = list(
-                                             alpha = 0.1,       # cost of Jmax
-                                             gamma = 1          # cost of hydraulic repair
-                                           ), 
-                                           opt_hypothesis = "PM", gs_approximation = "PM")
-        return(tibble(timestamp_aggr = x$timestamp_aggr) %>% bind_cols(res))
-      })%>% bind_rows()->df_PM
-    colnames(df_PM)[-1] <- paste(colnames(df_PM[,-1]), "PM", sep = "_")
-    
-    
     df_res <- df_res %>% 
-      left_join(df_PM, by = "timestamp_aggr") %>%
       left_join(df_Ohm, by = "timestamp_aggr") %>%
-      mutate(PHydro = E_Ohm/1e6*3600*LAI , #transform to mol m-2soil h-1
-             `PHydro Penman-Monteith` = E_PM*3600*LAI#
-             # `PHydro Penman-Monteith` = E_PM*55.5*3600 *LAI#,
-             # `PHydro Penman-Monteith simple` = E_simple_PM/1e6*3600*LAI
-      )
+      mutate(PHydro = E_Ohm/1e6*3600*LAI) #transform to mol m-2soil h-1
+    
+    #if there is net radiation then calculate phydro with penman monteith
+    if(any(!is.na(df$netrad))){
+      df %>%  
+        filter(!is.na(ta),!is.na(FAPAR),!is.na(ppfd_in),!is.na(netrad), !is.na(vpd),FAPAR > 0, ppfd_in > 0) %>%
+        split(seq(nrow(.)))%>%
+        purrr::map(function(x){
+          print(paste("PM:", x$timestamp_aggr))
+          psi_soil <- medfate::soil_psi(medfate::soil(tibble(widths = x$st_soil_depth*10, clay = x$st_clay_perc, sand = x$st_sand_perc, om = NA, bd = 1.6, rfc = 70), W =x$swvl), model = "VG")
+          if(is.na(psi_soil)){
+            psi_soil <- medfate::soil_psi(medfate::soil(tibble(widths = x$st_soil_depth*10, clay = x$st_clay_perc, sand = x$st_sand_perc, om = NA, bd = 1.6, rfc = 70), W =x$swvl), model = "SX")
+          }
+          res <- pmodel_hydraulics_numerical(tc = x$ta, ppfd =x$ppfd_in/x$LAI, vpd = x$vpd, u = x$ws, ustar=NA, nR=x$netrad, co2=x$CO2, LAI = x$LAI,
+                                             elv = x$si_elev, fapar = (x$FAPAR), 
+                                             kphio = calc_ftemp_kphio(x$ta), psi_soil = psi_soil, rdark = 0, par_plant = par_plant_std, 
+                                             par_cost = list(
+                                               alpha = 0.1,       # cost of Jmax
+                                               gamma = 1          # cost of hydraulic repair
+                                             ), 
+                                             opt_hypothesis = "PM", gs_approximation = "PM")
+          return(tibble(timestamp_aggr = x$timestamp_aggr) %>% bind_cols(res))
+        })%>% bind_rows()->df_PM
+      colnames(df_PM)[-1] <- paste(colnames(df_PM[,-1]), "PM", sep = "_")
+      
+      df_res <- df_res %>% 
+        left_join(df_PM, by = "timestamp_aggr") %>%
+        mutate(`PHydro Penman-Monteith` = E_PM*3600*LAI) #transform to mol m-2soil h-1
+      
+    }
+    
   }
   #### REMOVE DATA ####
   rm(sfn)
   gc()
   
-  save(df_res, file = paste0("DATA/OUTCOME_MONTHLY/",x,".RData"))
+  if(nrow(df_res)>0){
+    save(df_res, file = paste0("DATA/OUTCOME_MONTHLY/",x,".RData"))
+  }
   #return(df_res)
   
 })#->DF
