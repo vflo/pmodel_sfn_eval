@@ -1,11 +1,11 @@
 do_phydro_params <- function(sp, sfn = sfn, visco = visco, density = density){
-  cond <- sp$VCleaf_kmax
-  c <- sp$VCleaf_c
-  d <- sp$VCleaf_d
-  psi <- seq(0,-6,-0.05)
-  if(is.na(cond)){cond <- sp$Kmax_stemxylem*0.5}
-  if(is.na(c)){c <- sp$VCstem_c}
-  if(is.na(d)){d <- sp$VCstem_d}
+  cond <- sp$Kl
+  c <- sp$c
+  d <- sp$d
+  psi <- seq(0,-9,-0.01)
+  if(is.na(cond)){cond <- sp$Ks}
+  if(is.na(c)){c <- sp$c}
+  if(is.na(d)){d <- sp$d}
   if(is.na(cond)){cond <- NA}
   if(is.na(c)){c <- NA}
   if(is.na(d)){d <- NA}
@@ -25,7 +25,7 @@ do_phydro_params <- function(sp, sfn = sfn, visco = visco, density = density){
   #plot(vulne_curve)
   #lines(cond*res)
   sfn %>% 
-    filter(pl_species == sp$Name) %>% 
+    filter(pl_species == sp$pl_species) %>% 
     group_by(pl_code) %>%
     dplyr::select(pl_code, pl_sapw_area, pl_leaf_area, pl_height, st_lai, st_basal_area, sp_basal_area_perc, st_height) %>% 
     summarise_all(unique,

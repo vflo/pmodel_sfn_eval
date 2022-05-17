@@ -11,9 +11,10 @@ library(xts)
 library(medfate)
 library(mgcv)
 library(qgam)
+library(GauPro)
 source("dist_merge.R")
 
-sapply(list('calc_sfn_aggr_E.R','calc_sfn_aggr_env.R','calc_sfn_scale.R','swvl_aggregation.R','calc_optim_swc.R','do_phydro_params.R'), source, .GlobalEnv)
+sapply(list('calc_sfn_aggr_E.R','calc_sfn_aggr_env.R','calc_sfn_scale.R','swvl_aggregation.R','calc_optim_swc.R','do_phydro_params.R','data_processing_functions.R'), source, .GlobalEnv)
 
 #### LOAD SAPFLUXNET DATA ####
 path <- "../0.1.5/RData/plant"
@@ -60,11 +61,40 @@ fapar <-read_csv("DATA/FAPAR_sites.csv")
 fapar_noaa <-read_csv("DATA/FAPAR_sites_noaa.csv")
 
 #species data load
-data("SpParamsUS")
-data("SpParamsMED")
-
-SpParams <- SpParamsUS %>% bind_rows(SpParamsMED)
+# data("SpParamsUS")
+# data("SpParamsMED")
+# 
+# SpParams <- SpParamsUS %>% bind_rows(SpParamsMED)
+SpParams <- read_csv("DATA/sp_traits.csv")
 
 #soil data
-load('DATA/clay.RData')
-load('DATA/sand.RData')
+# load('DATA/clay.RData')
+# load('DATA/sand.RData')
+
+#precipitation data
+precip_monthly_average <- read_csv("DATA/precipitation_monthly_average_sites.csv")
+
+precip_monthly_average <- precip_monthly_average %>% 
+  mutate(
+    Date = paste0(Date,"01"),
+    timestamp = as.Date(Date, format = "%Y%m%d"),
+    precip_month = mean*lubridate::days_in_month(timestamp))
+
+#sw_in data
+sw_in_monthly_average <- read_csv("DATA/sw_in_monthly_average_sites.csv")
+
+sw_in_monthly_average <- sw_in_monthly_average %>% 
+  mutate(
+    Date = paste0(Date,"01"),
+    timestamp = as.Date(Date, format = "%Y%m%d"),
+    sw_in_month = mean/(60*60*24))
+
+#temp data
+temp_monthly_average <- read_csv("DATA/temp_monthly_average_sites.csv")
+
+temp_monthly_average <- temp_monthly_average %>% 
+  mutate(
+    Date = paste0(Date,"01"),
+    timestamp = as.Date(Date, format = "%Y%m%d"),
+    temp_month = mean-273.15)
+

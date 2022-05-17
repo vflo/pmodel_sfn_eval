@@ -51,8 +51,8 @@ optim_swc <- function(sfn_object, psi_data, min_swc = 0, max_swc = 0.6, type = "
         unique() %>%
         mutate(swvl = swvl_aggregation(st_soil_depth,swvl1,swvl2,swvl3,swvl4)) %>% 
         group_by(TIMESTAMP,st_soil_depth,st_sand_perc,st_clay_perc) %>%
-        summarise(swvl = swvl) %>% 
-        ungroup() %>% 
+        summarise(swvl = swvl, .groups ="drop" ) %>% 
+        # ungroup() %>% 
         filter(!is.na(swvl)) 
     }
     
@@ -64,8 +64,8 @@ optim_swc <- function(sfn_object, psi_data, min_swc = 0, max_swc = 0.6, type = "
         unique() %>%
         mutate(swvl = swvl_aggregation(st_soil_depth,swvl1,swvl2,swvl3,swvl4)) %>% 
         group_by(TIMESTAMP,st_soil_depth,st_sand_perc,st_clay_perc) %>%
-        summarise(swvl = swc_shallow) %>% 
-        ungroup() %>% 
+        summarise(swvl = swc_shallow,.groups = "drop" ) %>% 
+        # ungroup() %>% 
         filter(!is.na(swvl)) 
     }
 
