@@ -14,7 +14,7 @@
 #'
 #' @export
 #'
-optim_swc <- function(sfn_object, psi_data, min_swc = 0, max_swc = 0.6, type = "swvl"){
+optim_swc <- function(sfn_object, psi_data, soil=soil, min_swc = 0, max_swc = 0.6, type = "swvl"){
   #check if sfn_object is a tibble. If not, stop calculation.
   if(!is_tibble(sfn_object)){stop("sfn_object should be a tibble")}
   #check if psi_data is a tibble. If not, stop calculation.
@@ -75,7 +75,10 @@ optim_swc <- function(sfn_object, psi_data, min_swc = 0, max_swc = 0.6, type = "
       b <- par[1]
       s_x <- par[2]
       psi_sfn <- sfn_swvl %>% 
-        mutate(psi_sfn = medfate::soil_psi(medfate::soil(tibble(widths = st_soil_depth*10, clay = st_clay_perc, sand = st_sand_perc, om = NA, bd = 1.6, rfc = 70), W = b * swvl+s_x), model = "SX")) %>%
+        mutate(psi_sfn = medfate::soil_psi(medfate::soil(tibble(widths = st_soil_depth*10, clay = st_clay_perc, 
+                                                                sand = st_sand_perc, om = soil$OM, bd = soil$bd, rfc = 70),
+                                                         W = (b * swvl+s_x)/
+                                                           soil_thetaSATSX(clay = st_clay_perc, sand = st_sand_perc, om = soil$OM), model = "SX"))) %>%
         dplyr::select(TIMESTAMP, psi_sfn) %>%
         mutate(date = lubridate::date(TIMESTAMP))
     
