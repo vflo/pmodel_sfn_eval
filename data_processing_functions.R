@@ -213,7 +213,11 @@ data_prep <- function(df_sfn, env, opt_swc){
          netrad = case_when(is.na(netrad)~ netr,
                             !is.na(netrad)~ netrad),
          CO2 = case_when(is.na(CO2) ~ 400,
-                         !is.na(CO2) ~ CO2)) %>% 
+                         !is.na(CO2) ~ CO2),
+         pl_height = case_when(is.na(pl_height) ~ st_height,
+                               is.na(pl_height) && is.na(st_height) ~ height_GEDI,
+                               is.na(pl_height) && is.na(st_height) && is.na(height_GEDI) ~ height_simard,
+                               !is.na(pl_height) ~ pl_height)) %>% 
   filter(!is.na(REW))->df
 
 # fit_ws <- lm(ws~0+ws_ERA, data =df) %>% summary()
