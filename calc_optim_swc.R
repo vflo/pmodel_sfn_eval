@@ -74,11 +74,11 @@ optim_swc <- function(sfn_object, psi_data, soil=soil, min_swc = 0, max_swc = 0.
     swc_increment <- function(par){
       b <- par[1]
       s_x <- par[2]
-      psi_sfn <- sfn_swvl %>% 
+      soil_sat <- soil_thetaSATSX(clay =  unique(sfn_swvl$st_clay_perc), sand =  unique(sfn_swvl$st_sand_perc), om = unique(soil$OM))
+      psi_sfn <- sfn_swvl %>% bind_cols(tibble( soil_sat = soil_sat)) %>% 
         mutate(psi_sfn = medfate::soil_psi(medfate::soil(tibble(widths = st_soil_depth*10, clay = st_clay_perc, 
                                                                 sand = st_sand_perc, om = soil$OM, bd = soil$bd, rfc = 70),
-                                                         W = (b * swvl+s_x)/
-                                                           soil_thetaSATSX(clay = st_clay_perc, sand = st_sand_perc, om = soil$OM), model = "SX"))) %>%
+                                                         W = (b * swvl+s_x)/soil_sat))) %>%
         dplyr::select(TIMESTAMP, psi_sfn) %>%
         mutate(date = lubridate::date(TIMESTAMP))
     

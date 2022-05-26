@@ -13,6 +13,7 @@ add_miss_var <- function(sfn=sfn){
   if(!any(colnames(sfn) == "vpd")){sfn <- sfn %>% mutate(vpd = c(NA))}
   if(!any(colnames(sfn) == "ta")){sfn <- sfn %>% mutate(ta = c(NA))}
   if(!any(colnames(sfn) == "swc_shallow")){sfn <- sfn %>% mutate(swc_shallow = c(NA))}
+  if(!any(colnames(sfn) == "st_soil_depth")){sfn <- sfn %>% mutate(st_soil_depth = c(NA))}
   if(!any(colnames(sfn) == "CO2")){sfn <- sfn %>% mutate(CO2 = 400)}
   if(!any(colnames(sfn) == "aet")){sfn <- sfn %>% mutate(aet = NA)}
   if(!any(colnames(sfn) == "cond")){sfn <- sfn %>% mutate(cond = NA)}
@@ -170,6 +171,8 @@ mean_alpha_calc <- function(sfn, sw_in_monthly_average, temp_monthly_average, pr
   time(temp_month)<-timeind;
   time(precip_month)<-timeind
 
+  # soil <- soil %>% mutate(depth = 7)
+  
   splash_out <- rsplash::splash.point(sw_in_month,
                                     temp_month,
                                     precip_month,
@@ -179,17 +182,19 @@ mean_alpha_calc <- function(sfn, sw_in_monthly_average, temp_monthly_average, pr
                                     0,
                                     soil_data = as.numeric(soil))
   
+  # rsplash::unSWC(as.numeric(soil),7,splash_out$wn,units="v/v")
+  
   mean(splash_out$aet,na.rm = TRUE)/mean(splash_out$pet,na.rm = TRUE)
 }
 
 
-data_prep <- function(df_sfn, env){
+data_prep <- function(df_sfn, env, opt_swc){
   df_sfn %>% 
   left_join(env, by = c("timestamp_aggr", "TIMESTAMP")) %>%
   bind_cols(tibble(opt_swc_slope = opt_swc[1],opt_swc_int =  opt_swc[2])) %>% 
   # filter(!is.na(E_stand)) %>% 
   # filter(lubridate::date(TIMESTAMP) >= lubridate::ymd(20140101), lubridate::date(TIMESTAMP) < lubridate::ymd(20150101)) %>%
-  mutate(`E Sap flow`= E_stand/18.2, #mol m-2 h-1
+  mutate(E_sapflow= E_stand/18.2, #mol m-2 h-1
          PPFD = PPFD*1e6/86400,
          ppfd_ERA5 = sw_ERA5 * 2.114, #transform sw ERA5 to ppfd
          netr = netr*1e6/86400,

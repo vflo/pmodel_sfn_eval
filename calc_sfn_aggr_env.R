@@ -27,7 +27,7 @@ calc_sfn_aggr_env <- function(sfn_object, time_aggregation = "1 hour"){
     dplyr::select(TIMESTAMP,ta,rh,ppfd_in,sw_in,vpd,ext_rad,netrad,ws,swc_shallow,ext_rad,
                   swvl1:swvl4,st_soil_depth,st_sand_perc,st_clay_perc,OM,gravel,bd,depth,
                   si_elev,FAPAR,Fapar,LAI,CO2,aet, netr, VPD, PPFD, tc,
-                  sw_ERA5) %>% 
+                  sw_ERA5, height_simard, height_GEDI) %>% 
     unique() %>% 
     group_by(TIMESTAMP) %>%
     summarise_all(mean) %>% 

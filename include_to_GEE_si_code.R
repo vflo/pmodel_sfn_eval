@@ -11,7 +11,9 @@ coord <-read_csv("DATA/sfn_sites_coord.csv")
 #### GEE data ####
 # df <-read_csv("DATA/Precipitation_monthly_SFN_1990_2018.csv")
 # df <-read_csv("DATA/sw_in_monthly.csv")
-df <-read_csv("DATA/temp_monthly.csv")
+# df <-read_csv("DATA/temp_monthly.csv")
+# df <-read_csv("DATA/tree_height_10km.csv")
+df <-read_csv("DATA/GEDI/sfn_GEDI.csv")
 
 df %>% 
   distinct() %>% 
@@ -26,4 +28,4 @@ temp <- foo %>%
               rename(si_lat = y_lat,
                      si_long = y_long))
 
-write_csv(temp, file="DATA/temp_monthly_average_sites.csv")
+write_csv(temp, file="DATA/tree_height_GEDI.csv")

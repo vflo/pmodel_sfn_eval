@@ -63,12 +63,21 @@ as.list(flx_files$sfn_sites) %>%
       mutate(st_clay_perc = case_when(is.na(st_clay_perc)~ clay,
                                       !is.na(st_clay_perc)~ st_clay_perc),
              st_sand_perc = case_when(is.na(st_sand_perc)~ sand,
-                                      !is.na(st_sand_perc)~ st_sand_perc))
+                                      !is.na(st_sand_perc)~ st_sand_perc),
+             st_soil_depth = case_when(is.na(st_soil_depth)~ depth*100,
+                                      !is.na(st_soil_depth)~ st_soil_depth))
     
     #join SW ERA5
     sfn <- sfn %>% 
       left_join(sw_ERA5,by = c("si_code", "TIMESTAMP_daylight")) %>% 
       mutate(sw_ERA5 = sw_ERA5_18/2) # transform into mean daily value (divide by two to account for night value)
+    
+    
+    #join tree height
+    sfn <- sfn %>% 
+      left_join(simard,by = c("si_code")) %>% 
+      left_join(GEDI,by = c("si_code"))
+    
     
     ##CALIBRATE SOIL POTENTIAL by adding SWC
     ## THE OPTIMUM SWC value to add

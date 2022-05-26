@@ -73,5 +73,11 @@ SpParams <- read_csv("DATA/sp_traits.csv")
 # load('DATA/clay.RData')
 # load('DATA/sand.RData')
 
+#tree height data
+simard <- read_csv("DATA/tree_height_10km_simard.csv") %>% mutate(height_simard = mean) %>% dplyr::select(-c(si_lat, si_long, Date, mean))
+GEDI <- read_csv("DATA/tree_height_GEDI.csv")%>% mutate(height_GEDI = mean) %>% dplyr::select(-c(si_lat, si_long, mean))
+
+
+
 
 
