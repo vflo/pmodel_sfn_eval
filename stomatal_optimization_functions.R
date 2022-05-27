@@ -11,6 +11,7 @@ get_a_ci <- function(v25,j25,gamma,gc,ca,tem,par){
   min_p  = gamma
   adjust = 0.98
   r_day  = v25 * 0.01 *  2.0**(0.1*(tem-25.0)) / (1.0+exp(1.3*(tem-55.0)))
+  # r_day = 0
   continue <- TRUE
   while(continue){
     tar_p = 0.5 * (max_p+min_p)
@@ -148,8 +149,8 @@ calc_assim_rubisco_limited <- function (gs, vcmax, par_photosynth, v25, par_env)
   tem <- par_env$tc
   ca = par_photosynth$ca
   gs = gs * 1e+06/par_photosynth$patm
-  d = v25 * 0.01 *  2.0**(0.1*(tem-25.0)) / (1.0+exp(1.3*(tem-55.0))) # day respiration as f(temperature)
-  # d = par_photosynth$delta
+  # d = v25 * 0.01 *  2.0**(0.1*(tem-25.0)) / (1.0+exp(1.3*(tem-55.0))) # day respiration as f(temperature)
+  d = par_photosynth$delta
   A <- -1 * gs
   B <- gs * ca - gs * par_photosynth$kmm - vcmax * (1 - d)
   C <- gs * ca * par_photosynth$kmm + vcmax * (par_photosynth$gammastar + 
@@ -166,11 +167,10 @@ calc_assim_light_limited <- function (gs, jmax, par_photosynth, v25, par_env){
   gs = gs * 1e+06/par_photosynth$patm
   phi0iabs = par_photosynth$phi0 * par_photosynth$Iabs
   jlim = phi0iabs/sqrt(1 + (4 * phi0iabs/jmax)^2)
-  d = v25 * 0.01 *  2.0**(0.1*(tem-25.0)) / (1.0+exp(1.3*(tem-55.0))) # day respiration as f(temperature)
-  # d = par_photosynth$delta
+  # d = v25 * 0.01 *  2.0**(0.1*(tem-25.0)) / (1.0+exp(1.3*(tem-55.0))) # day respiration as f(temperature)
+  d = par_photosynth$delta
   A <- -1 * gs
-  B <- gs * ca - gs * 2 * par_photosynth$gammastar - jlim * 
-    (1 - d)
+  B <- gs * ca - gs * 2 * par_photosynth$gammastar - jlim * (1 - d)
   C <- gs * ca * 2 * par_photosynth$gammastar + jlim * (par_photosynth$gammastar + d * par_photosynth$kmm)
   ci <- QUADM(A, B, C)
   aj <- gs * (ca - ci)
@@ -179,8 +179,8 @@ calc_assim_light_limited <- function (gs, jmax, par_photosynth, v25, par_env){
 
 calc_vcmax_coordinated_numerical <-  function(aj, ci, par_photosynth, v25, par_env){
   tem <- par_env$tc
-  d = v25 * 0.01 *  2.0**(0.1*(tem-25.0)) / (1.0+exp(1.3*(tem-55.0))) # day respiration as f(temperature)
-  # d = par_photosynth$delta
+  # d = v25 * 0.01 *  2.0**(0.1*(tem-25.0)) / (1.0+exp(1.3*(tem-55.0))) # day respiration as f(temperature)
+  d = par_photosynth$delta
   vcmax_coord = aj*(ci + par_photosynth$kmm)/(ci*(1-d) - (par_photosynth$gammastar+par_photosynth$kmm*d))
   return(vcmax_coord)
 }
@@ -293,12 +293,13 @@ get_optima_sperry <- function(jmax = jmax, vcmax = vcmax, j25 = j25, v25 = v25, 
   low_swp <- TRUE
   print("WARNING: soil water potential is lower than critical plant water potential.")} #(adjust values if psi soil is less than psi critical)
   E_crit = get_e_crit(psi_soil, K, d, c, h)
-  de = 0.01
+  de = 0.1
   # 2. increase the e stepwise
   list_e = vector("list", 100)
   list_k = vector("list", 100)
   list_a = vector("list", 100)
   list_p = vector("list", 100)
+  list_ci = vector("list", 100)
   for(i in 1:100){
     e   <- i * 0.01 * E_crit
     p   <- get_p(psi_soil, e, K, d, c, h)
@@ -312,6 +313,9 @@ get_optima_sperry <- function(jmax = jmax, vcmax = vcmax, j25 = j25, v25 = v25, 
     list_e[[i]] <- e
     list_k[[i]] <- k
     list_a[[i]] <- c_a$a
+    list_ci[[i]] <- c_a$ci
+    # list_a[[i]] <- c_a[[2]]
+    # list_ci[[i]] <- c_a[[1]]
     list_p[[i]] <- p
   }
 # 3. extend the lists
@@ -350,13 +354,17 @@ get_optima_wang<- function(jmax = jmax, vcmax = vcmax, j25 = j25, v25 = v25, psi
     e   = 0.5 * (e_min+e_max)
     g   <- e/1.6/(par_env$vpd/par_env$patm)/1e3
     c_a <- calc_assimilation_limiting(vcmax, jmax, g, par_photosynth,v25, par_env)
+    # c_a <- get_a_ci(v25,j25,par_photosynth$gammastar,g,par_photosynth$ca,par_env$tc,par_photosynth$Iabs)
     e_de = e + de
     g_de   <- e_de/1.6/(par_env$vpd/par_env$patm)/1e3
     c_a_de <- calc_assimilation_limiting(vcmax, jmax, g_de, par_photosynth,v25, par_env)
+    # c_a_de <- get_a_ci(v25,j25,par_photosynth$gammastar,g_de,par_photosynth$ca,par_env$tc,par_photosynth$Iabs)
     optimizer = c_a_de$a * (e_crit-e_de) - c_a$a * (e_crit-e)
+    # optimizer = c_a_de[[2]] * (e_crit-e_de) - c_a[[2]] * (e_crit-e)
     if ((e_max-e_min)<0.001){
       e_opt = e
       a_opt = c_a$a
+      # a_opt = c_a[[2]]
       p_opt = get_p(psi_soil, e, K, d, c, h)
       continue <- FALSE
       }
@@ -395,14 +403,18 @@ get_optima_wap <- function(jmax = jmax, vcmax = vcmax, j25 = j25, v25 = v25, psi
     p = get_p(psi_soil, e, K, d, c, h)
     g   <- e/1.6/(par_env$vpd/par_env$patm)/1e3
     c_a <- calc_assimilation_limiting(vcmax, jmax, g, par_photosynth,v25, par_env)
+    # c_a <- get_a_ci(v25,j25,par_photosynth$gammastar,g,par_photosynth$ca,par_env$tc,par_photosynth$Iabs)
     e_de = e + de
     p_de = get_p(psi_soil, e_de, K, d, c, h)
     g_de   <- e_de/1.6/(par_env$vpd/par_env$patm)/1e3
     c_a_de <- calc_assimilation_limiting(vcmax, jmax, g_de, par_photosynth,v25, par_env)
+    # c_a_de <- get_a_ci(v25,j25,par_photosynth$gammastar,g_de,par_photosynth$ca,par_env$tc,par_photosynth$Iabs)
     optimizer = c_a_de$a - aa*p_de**2.0 - bb*p_de - c_a$a + aa*p**2.0 + bb*p
+    # optimizer = c_a_de[[2]] - aa*p_de**2.0 - bb*p_de - c_a[[2]] + aa*p**2.0 + bb*p
     if ((e_max-e_min)<0.001){
       e_opt = e
       a_opt = c_a$a
+      # a_opt = c_a[[2]]
       p_opt = get_p(psi_soil, e, K, d, c, h)
       continue <- FALSE
     }

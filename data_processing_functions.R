@@ -195,6 +195,7 @@ data_prep <- function(df_sfn, env, opt_swc){
   # filter(!is.na(E_stand)) %>% 
   # filter(lubridate::date(TIMESTAMP) >= lubridate::ymd(20140101), lubridate::date(TIMESTAMP) < lubridate::ymd(20150101)) %>%
   mutate(E_sapflow= E_stand/18.2, #mol m-2 h-1
+         E_sapflow_sd= E_stand_sd/18.2, #mol m-2 h-1
          PPFD = PPFD*1e6/86400,
          ppfd_ERA5 = sw_ERA5 * 2.114, #transform sw ERA5 to ppfd
          netr = netr*1e6/86400,
@@ -213,11 +214,7 @@ data_prep <- function(df_sfn, env, opt_swc){
          netrad = case_when(is.na(netrad)~ netr,
                             !is.na(netrad)~ netrad),
          CO2 = case_when(is.na(CO2) ~ 400,
-                         !is.na(CO2) ~ CO2),
-         pl_height = case_when(is.na(pl_height) ~ st_height,
-                               is.na(pl_height) && is.na(st_height) ~ height_GEDI,
-                               is.na(pl_height) && is.na(st_height) && is.na(height_GEDI) ~ height_simard,
-                               !is.na(pl_height) ~ pl_height)) %>% 
+                         !is.na(CO2) ~ CO2)) %>% 
   filter(!is.na(REW))->df
 
 # fit_ws <- lm(ws~0+ws_ERA, data =df) %>% summary()

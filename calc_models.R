@@ -4,7 +4,7 @@ calc_pmodel <- function(df_temp){
     split(seq(nrow(.))) %>%
     purrr::map_df(function(x){
       res <- rpmodel::rpmodel(tc=x$ta, vpd=x$vpd*1000, co2=x$CO2, fapar=x$FAPAR, 
-                              ppfd = x$ppfd_in/1e6, soilm =x$REW, do_soilmstress = FALSE, elv=sfn$si_elev %>% unique()) %>% 
+                              ppfd = x$ppfd_in/1e6, do_soilmstress = FALSE, elv=sfn$si_elev %>% unique()) %>% 
         as_tibble()
       colnames(res) <- paste(colnames(res), "pmodel", sep = "_")
       res_temp <- x %>% bind_cols(res) %>% mutate(E_pmodel = 1.6*gs_pmodel*(vpd*1000)*3600) #mol m-2 h-1
@@ -24,7 +24,8 @@ calc_pmodel_swc <- function(df_temp, meanalpha, soil){
           as_tibble()
         colnames(res) <- paste(colnames(res), "pmodel_swc", sep = "_")
         res_temp <- x %>% bind_cols(res) %>% mutate(E_pmodel_swc= 1.6*gs_pmodel_swc*(vpd*1000)*3600, #mol m-2 h-1
-                                                    aet = aet * 55.5/24)
+                                                    aet = aet * 55.5/24) %>%  #transform to mol m-2soil h-1
+          dplyr::select(-c(3:29,30:43))
         return(res_temp)
     })
   }else{df_temp; print("Pmodel using soil water limitation was not computed")}

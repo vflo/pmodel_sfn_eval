@@ -1,7 +1,7 @@
 source("init_PREPARE_DATA_LIST.R")
 
 #### MODEL CALCULATION ####
-as.list(flx_files$sfn_sites) %>%
+as.list(flx_files$sfn_sites)[-c(1:171)] %>%
   purrr::map(function(x){
     #load SAPFLUXNET site and aggregation at daily level
     sfn <- read_sfn_data(x, folder = path) %>%
@@ -76,8 +76,12 @@ as.list(flx_files$sfn_sites) %>%
     #join tree height
     sfn <- sfn %>% 
       left_join(simard,by = c("si_code")) %>% 
-      left_join(GEDI,by = c("si_code"))
-    
+      left_join(GEDI,by = c("si_code")) %>% 
+      mutate(height = case_when((is.na(pl_height) & !is.na(st_height)) ~ st_height,
+                                (is.na(pl_height) & is.na(st_height) & !is.na(height_GEDI)) ~ height_GEDI,
+                                (is.na(pl_height) & is.na(st_height) & is.na(height_GEDI) & !is.na(height_simard)) ~ height_simard,
+                                !is.na(pl_height) ~ pl_height))
+
     
     ##CALIBRATE SOIL POTENTIAL by adding SWC
     ## THE OPTIMUM SWC value to add

@@ -33,7 +33,8 @@ as.list(list_files) %>%
   #DATA preparation
     df <- data_prep(sfn_aggr_week, env_week, opt_swc) %>% bind_cols(si_code = si_code)
 
-
+    # par_plant_std$conductivity <- par_plant_std$conductivity*0.15
+    # par_plant_std$d <- par_plant_std$d*1.2
   #### MODEL CALCULATION ####
   ## PMODEL ##
     pmodel <- calc_pmodel(df)
@@ -60,8 +61,20 @@ as.list(list_files) %>%
       left_join(wang) %>% 
       left_join(wap) %>%
       suppressMessages()
-
-
+# 
+#     df_res %>% 
+#       ggplot()+
+#       geom_ribbon(aes(x=TIMESTAMP, ymin = (E_sapflow - E_sapflow_sd), ymax = (E_sapflow + E_sapflow_sd)), fill = "grey" )+
+#       geom_line(aes(TIMESTAMP,E_sapflow))+
+#       geom_line(aes(TIMESTAMP,E_pmodel), color="brown")+
+#       geom_line(aes(TIMESTAMP,E_pmodel_swc), color="purple")+
+#       geom_line(aes(TIMESTAMP,E_phydro), color="green")+
+#       geom_line(aes(TIMESTAMP,E_sperry), color="orange")+
+#       geom_line(aes(TIMESTAMP,E_wang), color="yellow")+
+#       geom_line(aes(TIMESTAMP,E_wap), color="red")+
+#       geom_line(aes(TIMESTAMP,aet), color="blue")+
+#       theme_bw()
+    
   #### SAVE DATA ####
     if(nrow(df_res)>0){
       save(df_res, file = paste0("DATA/OUTCOME_WEEKLY/",(gsub(".*/","",x = x))))
