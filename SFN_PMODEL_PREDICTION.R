@@ -1,5 +1,8 @@
 source("init_SFN_MODEL_PREDICTION.R")
 
+plan(multisession, workers = 4)
+furrr_options(globals = TRUE, seed = NULL)
+
 #### MODEL CALCULATION ####
 as.list(list_files) %>%
   purrr::map(function(x){
@@ -35,31 +38,51 @@ as.list(list_files) %>%
 
     # par_plant_std$conductivity <- par_plant_std$conductivity*0.15
     # par_plant_std$d <- par_plant_std$d*1.2
+    sensitivity <- tibble(sensitivity_K = c(seq(0.5,1.5,0.1), rep(1,15)),
+                          sensitivity_psi = c(rep(1,15), seq(0.5,1.5,0.1)))
+
   #### MODEL CALCULATION ####
   ## PMODEL ##
-    pmodel <- calc_pmodel(df)
+    pmodel <- calc_pmodel(df)%>% as_tibble()
 
   # PMODEL SWC limitation if there is AET/PET then calculate it
-    pmodel_swc <- calc_pmodel_swc(df, meanalpha, soil)
+    pmodel_swc <- calc_pmodel_swc(df, meanalpha, soil)%>% as_tibble()
 
-  # PHydro if there is species information  
-    phydro <- calc_phydro(df, PHYDRO_TRUE, par_plant_std, soil)
-  
+  # PHydro if there is species information 
+    sensitivity %>% 
+      split(seq(nrow(.)))%>%
+      purrr::map(function(x){
+        calc_phydro(df, PHYDRO_TRUE, par_plant_std, soil, x) %>% as_tibble()
+      })  %>%  bind_rows() -> phydro 
+    
   # Sperry model
-    sperry <- calc_sperry(df, PHYDRO_TRUE, par_plant_std, soil)
-  
+    sensitivity %>% 
+      split(seq(nrow(.)))%>%
+      purrr::map(function(x){
+        calc_sperry(df, PHYDRO_TRUE, par_plant_std, soil,x) %>% as_tibble()
+      }) %>%  bind_rows() -> sperry
+    
   # Wang model
-    wang <- calc_wang(df, PHYDRO_TRUE, par_plant_std, soil)
-
+    sensitivity %>% 
+      split(seq(nrow(.)))%>%
+      purrr::map(function(x){
+        calc_wang(df, PHYDRO_TRUE, par_plant_std, soil,x) %>% as_tibble()
+      })  %>%  bind_rows() -> wang
+    
   # Wap model
-    wap <- calc_wap(df, PHYDRO_TRUE, par_plant_std, soil)
-  
+    sensitivity %>% 
+      split(seq(nrow(.)))%>%
+      purrr::map(function(x){
+        calc_wap(df, PHYDRO_TRUE, par_plant_std, soil,x) %>% as_tibble()
+      })  %>%  bind_rows() -> wap
+    
+    
     df_res <- pmodel %>% 
-      left_join(pmodel_swc) %>% 
-      left_join(phydro) %>% 
-      left_join(sperry) %>% 
-      left_join(wang) %>% 
-      left_join(wap) %>%
+      bind_rows(pmodel_swc) %>% 
+      bind_rows(phydro) %>% 
+      bind_rows(sperry) %>% 
+      bind_rows(wang) %>% 
+      bind_rows(wap) %>%
       suppressMessages()
 # 
 #     df_res %>% 
@@ -88,31 +111,39 @@ as.list(list_files) %>%
     if(nrow(df)>1 && any(!is.na(df$E_stand))){
 
   #### MODEL CALCULATION ####
-  ## PMODEL ##
-    pmodel <- calc_pmodel(df)
-  
-  # PMODEL SWC limitation if there is AET/PET then calculate it
-    pmodel_swc <- calc_pmodel_swc(df, meanalpha, soil)
-  
-  # PHydro if there is species information  
-    phydro <- calc_phydro(df, PHYDRO_TRUE, par_plant_std, soil)
-  
-  # Sperry model
-    sperry <- calc_sperry(df, PHYDRO_TRUE, par_plant_std, soil)
-  
-  # Wang model
-    wang <- calc_wang(df, PHYDRO_TRUE, par_plant_std, soil)
-  
-  # Wap model
-    wap <- calc_wap(df, PHYDRO_TRUE, par_plant_std, soil)
-  
-    df_res <- pmodel %>% 
-      left_join(pmodel_swc) %>% 
-      left_join(phydro) %>% 
-      left_join(sperry) %>% 
-      left_join(wang) %>% 
-      left_join(wap) %>%
-      suppressMessages()
+      ## PMODEL ##
+      pmodel <- calc_pmodel(df)%>% as_tibble()
+      
+      # PMODEL SWC limitation if there is AET/PET then calculate it
+      pmodel_swc <- calc_pmodel_swc(df, meanalpha, soil)%>% as_tibble()
+      
+      # PHydro if there is species information 
+      sensitivity %>% 
+        split(seq(nrow(.)))%>%
+        purrr::map(function(x){
+          calc_phydro(df, PHYDRO_TRUE, par_plant_std, soil, x) %>% as_tibble()
+        })  %>%  bind_rows() -> phydro 
+      
+      # Sperry model
+      sensitivity %>% 
+        split(seq(nrow(.)))%>%
+        purrr::map(function(x){
+          calc_sperry(df, PHYDRO_TRUE, par_plant_std, soil,x) %>% as_tibble()
+        }) %>%  bind_rows() -> sperry
+      
+      # Wang model
+      sensitivity %>% 
+        split(seq(nrow(.)))%>%
+        purrr::map(function(x){
+          calc_wang(df, PHYDRO_TRUE, par_plant_std, soil,x) %>% as_tibble()
+        })  %>%  bind_rows() -> wang
+      
+      # Wap model
+      sensitivity %>% 
+        split(seq(nrow(.)))%>%
+        purrr::map(function(x){
+          calc_wap(df, PHYDRO_TRUE, par_plant_std, soil,x) %>% as_tibble()
+        })  %>%  bind_rows() -> wap
   
 
     if(nrow(df_res)>0){

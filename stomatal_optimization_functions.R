@@ -501,6 +501,7 @@ model_numerical <- function(tc, ppfd, vpd, nR, co2, elv, LAI, fapar, kphio, psi_
     nR = nR,
     LAI = LAI
   )
+  
   #vcmax and jmax calculation (Arhenius)
   j25 = par_plant$j25
   v25 = par_plant$v25
