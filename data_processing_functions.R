@@ -199,7 +199,7 @@ data_prep <- function(df_sfn, env, opt_swc){
          PPFD = PPFD*1e6/86400,
          ppfd_ERA5 = sw_ERA5 * 2.114, #transform sw ERA5 to ppfd
          netr = netr*1e6/86400,
-         patm = rpmodel::calc_patm(sfn$si_elev %>% unique()),
+         patm = rpmodel::calc_patm(si_elev %>% unique()),
          swvl = swvl_aggregation(st_soil_depth,swvl1,swvl2,swvl3,swvl4),
          # swvl = swc_shallow,
          swvl =  opt_swc_slope*swvl+opt_swc_int,

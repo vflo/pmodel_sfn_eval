@@ -1,8 +1,5 @@
 source("init_SFN_MODEL_PREDICTION.R")
 
-plan(multisession, workers = 4)
-furrr_options(globals = TRUE, seed = NULL)
-
 #### MODEL CALCULATION ####
 as.list(list_files) %>%
   purrr::map(function(x){
@@ -24,9 +21,9 @@ as.list(list_files) %>%
     sfn_aggr_month <- calc_sfn_aggr_E(sfn_agr,"1 month")
     env_month <- calc_sfn_aggr_env(sfn,"1 month")
     env_month <- env_month %>% mutate(CO2 = oce::fillGap(CO2))
-    sfn_aggr_day <- calc_sfn_aggr_E(sfn_agr,"1 day")
-    env_day <- calc_sfn_aggr_env(sfn,"1 day")
-    env_day <- env_day %>% mutate(CO2 = oce::fillGap(CO2))
+    # sfn_aggr_day <- calc_sfn_aggr_E(sfn_agr,"1 day")
+    # env_day <- calc_sfn_aggr_env(sfn,"1 day")
+    # env_day <- env_day %>% mutate(CO2 = oce::fillGap(CO2))
 
   # CALCULATE MEANALPHA
   
@@ -38,17 +35,20 @@ as.list(list_files) %>%
 
     # par_plant_std$conductivity <- par_plant_std$conductivity*0.15
     # par_plant_std$d <- par_plant_std$d*1.2
-    sensitivity <- tibble(sensitivity_K = c(seq(0.5,1.5,0.1), rep(1,15)),
-                          sensitivity_psi = c(rep(1,15), seq(0.5,1.5,0.1)))
+    sensitivity <- tibble(sensitivity_K = c(seq(0.5,1.5,0.1), rep(1,11)),
+                          sensitivity_psi = c(rep(1,11), seq(0.5,1.5,0.1))) %>% distinct()
 
   #### MODEL CALCULATION ####
   ## PMODEL ##
+    print("Calculating PMODEL")
     pmodel <- calc_pmodel(df)%>% as_tibble()
 
   # PMODEL SWC limitation if there is AET/PET then calculate it
+    print("Calculating PMODEL with swc limitation")
     pmodel_swc <- calc_pmodel_swc(df, meanalpha, soil)%>% as_tibble()
 
   # PHydro if there is species information 
+    print("Calculating PHYDRO")
     sensitivity %>% 
       split(seq(nrow(.)))%>%
       purrr::map(function(x){
@@ -56,6 +56,7 @@ as.list(list_files) %>%
       })  %>%  bind_rows() -> phydro 
     
   # Sperry model
+    print("Calculating SPERRY model")
     sensitivity %>% 
       split(seq(nrow(.)))%>%
       purrr::map(function(x){
@@ -63,6 +64,7 @@ as.list(list_files) %>%
       }) %>%  bind_rows() -> sperry
     
   # Wang model
+    print("Calculating WANG model")
     sensitivity %>% 
       split(seq(nrow(.)))%>%
       purrr::map(function(x){
@@ -70,12 +72,16 @@ as.list(list_files) %>%
       })  %>%  bind_rows() -> wang
     
   # Wap model
+    print("Calculating WAP model")
     sensitivity %>% 
       split(seq(nrow(.)))%>%
       purrr::map(function(x){
         calc_wap(df, PHYDRO_TRUE, par_plant_std, soil,x) %>% as_tibble()
       })  %>%  bind_rows() -> wap
     
+    ## PMODEL Ecrit ##
+    print("Calculating PMODEL Ecrit")
+    pmodel_ecrit <- calc_pmodel_ecrit(df, PHYDRO_TRUE, par_plant_std, soil)%>% as_tibble()
     
     df_res <- pmodel %>% 
       bind_rows(pmodel_swc) %>% 
@@ -145,6 +151,13 @@ as.list(list_files) %>%
           calc_wap(df, PHYDRO_TRUE, par_plant_std, soil,x) %>% as_tibble()
         })  %>%  bind_rows() -> wap
   
+      df_res <- pmodel %>% 
+        bind_rows(pmodel_swc) %>% 
+        bind_rows(phydro) %>% 
+        bind_rows(sperry) %>% 
+        bind_rows(wang) %>% 
+        bind_rows(wap) %>%
+        suppressMessages()
 
     if(nrow(df_res)>0){
       save(df_res, file = paste0("DATA/OUTCOME_MONTHLY/",(gsub(".*/","",x = x))))
