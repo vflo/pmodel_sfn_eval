@@ -59,7 +59,7 @@ calc_phydro <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil, sensi){
         res <- model_numerical(tc = x$ta, 
                                ppfd =x$ppfd_in/x$LAI, 
                                vpd = x$vpd*1000, 
-                               nR=x$netrad, 
+                               nR =x$netrad, 
                                co2=x$CO2, 
                                LAI = x$LAI,
                                elv = x$si_elev, 

@@ -289,7 +289,7 @@ get_optima_sperry <- function(jmax = jmax, vcmax = vcmax, j25 = j25, v25 = v25, 
   h = par_plant$height
   p_crit = d * log(1000.0) ^ (1.0/c)
   low_swp <- FALSE
-  if(p_crit>=psi_soil){psi_soil <- p_crit*0.99
+  if(psi_soil<=p_crit){psi_soil <- p_crit*0.98
   low_swp <- TRUE
   print("WARNING: soil water potential is lower than critical plant water potential.")} #(adjust values if psi soil is less than psi critical)
   E_crit = get_e_crit(psi_soil, K, d, c, h)
@@ -340,7 +340,7 @@ get_optima_wang<- function(jmax = jmax, vcmax = vcmax, j25 = j25, v25 = v25, psi
   h = par_plant$height
   p_crit = d * log(1000.0) ^ (1.0/c)
   low_swp <- FALSE
-  if(p_crit>=psi_soil){psi_soil <- p_crit*0.99
+  if(psi_soil<=p_crit){psi_soil <- p_crit*0.98
   low_swp <- TRUE
   print("WARNING: soil water potential is lower than critical plant water potential.")} #(adjust values if psi soil is less than psi critical)
   e_crit = get_e_crit(psi_soil, K, d, c, h)
@@ -388,7 +388,7 @@ get_optima_wap <- function(jmax = jmax, vcmax = vcmax, j25 = j25, v25 = v25, psi
   h = par_plant$height
   p_crit = d * log(1000.0) ^ (1.0/c)
   low_swp <- FALSE
-  if(p_crit>=psi_soil){psi_soil <- p_crit*0.99
+  if(psi_soil<=p_crit){psi_soil <- p_crit*0.98
   low_swp <- TRUE
   print("WARNING: soil water potential is lower than critical plant water potential.")} #(adjust values if psi soil is less than psi critical)
   e_crit = get_e_crit(psi_soil, K, d, c, h)
@@ -460,8 +460,10 @@ optimise_stomata_phydro <- function(fn_profit, v25, psi_soil, par_photosynth, pa
 phydro_optim = function(par, jmax=jmax, vcmax=vcmax, v25 = v25, psi_soil, par_cost, par_photosynth, par_plant, par_env){
   jmax = exp(par[1])  # Jmax in umol/m2/s (logjmax is supplied by the optimizer)
   dpsi = par[2]       # delta Psi in MPa
+  # print(paste("jmax: ", as.character(jmax), ", dpsi: ", as.character(dpsi)))
   gs = calc_gs(dpsi, psi_soil, par_plant, par_env)/1e3  # gs in mol/m2/s/Mpa
   
+  if(gs <= 0){return(-9999999)}else{
   ## light-limited assimilation
   a_j <- calc_assim_light_limited(gs, jmax, par_photosynth,v25,par_env) # Aj in umol/m2/s
   a = a_j$a
@@ -472,7 +474,7 @@ phydro_optim = function(par, jmax=jmax, vcmax=vcmax, v25 = v25, psi_soil, par_co
   out <- costs - a
   
   return(out)
-  
+  }
 }
 
 
@@ -549,9 +551,11 @@ model_numerical <- function(tc, ppfd, vpd, nR, co2, elv, LAI, fapar, kphio, psi_
     )
     p_crit = par_plant$d * log(1000.0) ^ (1.0/par_plant$c)
     low_swp <- FALSE
-    if(p_crit>=psi_soil){psi_soil <- p_crit*0.99
-    low_swp <- TRUE
-    print("WARNING: soil water potential is lower than critical plant water potential.")} #(adjust values if psi soil is less than psi critical)
+    if(psi_soil<=p_crit){
+      psi_soil <- p_crit*0.98
+      low_swp <- TRUE
+      print("WARNING: soil water potential is lower than critical plant water potential.")
+      } #(adjust values if psi soil is less than psi critical)
     lj_dps = optimise_stomata_phydro(phydro_optim,
                                      v25 = v25,
                                      psi_soil = psi_soil,
