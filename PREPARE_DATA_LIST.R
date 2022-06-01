@@ -1,7 +1,7 @@
 source("init_PREPARE_DATA_LIST.R")
 
 #### MODEL CALCULATION ####
-as.list(flx_files$sfn_sites)[-c(1:171)] %>%
+as.list(flx_files$sfn_sites)[[134]] %>%
   purrr::map(function(x){
     #load SAPFLUXNET site and aggregation at daily level
     sfn <- read_sfn_data(x, folder = path) %>%
@@ -58,6 +58,24 @@ as.list(flx_files$sfn_sites)[-c(1:171)] %>%
         }) -> soil_grid
       soil <- soil_grid %>% summarise_all(mean,na.rm = TRUE)
     }
+      #if the 9 cells don't have data, get the 9 adjacent cells of the 9 cells and do the mean
+    if(any(is.na(soil))){
+      print("No soil data in SoilGrids cell, obtainning 27 adjacent cells")
+      cells <- matrix(c(1,1,1,0,1,-1,0,1,0,0,0,-1,-1,1,-1,0,-1,-1),nrow=9,byrow = TRUE)
+      cells %>% 
+        split(rep(1:nrow(cells), each = ncol(cells))) %>% 
+        purrr::map_df(function(x){      
+          lat <- unique(sfn$si_lat)+x[1]*0.005
+          lon <- unique(sfn$si_long)+x[2]*0.005
+          cells %>%
+            split(rep(1:nrow(cells), each = ncol(cells))) %>% 
+            purrr::map_df(function(y){
+              splashTools::getSoilSite(lat+y[1]*0.0025, lon+y[2]*0.0025) %>% as.list %>% as_tibble
+              }) -> soil_grid
+            soil_grid %>% summarise_all(mean,na.rm = TRUE)
+        }) -> soil_grid_cell
+      soil <- soil_grid_cell %>% summarise_all(mean, na.rm = TRUE)
+      }
     
     sfn <- sfn %>% bind_cols(soil) %>% 
       mutate(st_clay_perc = case_when(is.na(st_clay_perc)~ clay,

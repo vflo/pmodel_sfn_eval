@@ -1,7 +1,7 @@
 source("init_SFN_MODEL_PREDICTION.R")
 
 #### MODEL CALCULATION ####
-as.list(list_files)[-c(1:48)] %>%
+as.list(list_files)[-c(1:142)] %>%
   purrr::map(function(x){
     load(x)
     print(gsub(".*/","",x = x))
@@ -81,7 +81,7 @@ as.list(list_files)[-c(1:48)] %>%
     
     # ## PMODEL Ecrit ##
     # print("Calculating PMODEL Ecrit")
-    # pmodel_ecrit <- calc_pmodel_ecrit(df, PHYDRO_TRUE, par_plant_std, soil)%>% as_tibble()
+    pmodel_ecrit <- calc_pmodel_ecrit(df, PHYDRO_TRUE, par_plant_std, soil)%>% as_tibble()
     # 
     df_res <- pmodel %>% 
       bind_rows(pmodel_swc) %>% 
