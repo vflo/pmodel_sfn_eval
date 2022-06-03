@@ -32,6 +32,13 @@ rpmodel_ecrit <- function (tc, vpd, co2, fapar, ppfd, patm = NA, elv = NA,
   ca <- co2_to_ca(co2, patm)
   gammastar <- rpmodel::calc_gammastar(tc, patm)
   kmm <- rpmodel::calc_kmm(tc, patm)
+  p_crit = d * log(1000.0) ^ (1.0/c)
+  low_swp <- FALSE
+  if(psi_soil<=p_crit){
+    psi_soil <- p_crit*0.98
+    low_swp <- TRUE
+    print("WARNING: soil water potential is lower than critical plant water potential.")
+  }
   ecrit <- get_e_crit(psi_soil, K, d, c, h)*LAI*1e-3 #micromols??
   resp <- rs * rpmodel::calc_ftemp_inst_rd(tc)
   a_cost = resp/ecrit
@@ -85,7 +92,7 @@ rpmodel_ecrit <- function (tc, vpd, co2, fapar, ppfd, patm = NA, elv = NA,
   out <- list(ca = rep(ca, len), gammastar = rep(gammastar, len), kmm = rep(kmm, len), a_cost = rep(a_cost, len), 
               chi = out_optchi$chi, mj = out_optchi$mj, mc = out_optchi$mc, ci = ci, lue = out_lue_vcmax$lue, gpp = gpp, 
               iwue = iwue, E = eactual, ecrit = ecrit, resp = resp, gs = gs, vcmax = vcmax, vcmax25 = vcmax25, 
-              jmax = jmax, rd = rd)
+              jmax = jmax, rd = rd, low_swp = low_swp)
   if (!is.null(returnvar)) 
     out <- out[returnvar]
   return(out)

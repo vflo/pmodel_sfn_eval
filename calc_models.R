@@ -8,6 +8,7 @@ calc_pmodel <- function(df_temp){
         as_tibble()
 
       res_temp <- x %>% 
+        bind_cols(low_swp = FALSE) %>% 
         bind_cols(res) %>% 
         bind_cols(model_type = "pmodel") %>% 
         mutate(E = 1.6*gs*(vpd*1000)*3600) #mol m-2 h-1
@@ -27,6 +28,7 @@ calc_pmodel_swc <- function(df_temp, meanalpha, soil){
                               do_soilmstress = TRUE, elv=x$si_elev %>% unique(), meanalpha = meanalpha) %>% 
           as_tibble()
         res_temp <- x %>% 
+          bind_cols(low_swp = FALSE) %>% 
           bind_cols(res) %>% 
           bind_cols(model_type = "pmodel_swc") %>% 
           mutate(E = 1.6*gs*(vpd*1000)*3600, #mol m-2 h-1
@@ -236,14 +238,14 @@ calc_wap <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil, sensi){
 
 
 #### PMODEL ECRIT ####
-calc_pmodel_ecrit <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil){
+calc_pmodel_ecrit <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil, sensi){
   #filter
   temp <- df_temp %>%  
     filter(!is.na(ta),!is.na(FAPAR),!is.na(ppfd_in), !is.na(vpd),FAPAR > 0, ppfd_in > 0, LAI>0, swvl > 0.01)
   
   #sensitivity analysis
-  # par_plant_std$psi50 <- par_plant_std$psi50 * sensi$sensitivity_psi
-  # par_plant_std$conductivity <- par_plant_std$conductivity * sensi$sensitivity_K
+  par_plant_std$psi50 <- par_plant_std$psi50 * sensi$sensitivity_psi
+  par_plant_std$conductivity <- par_plant_std$conductivity * sensi$sensitivity_K
   
   if(PHYDRO_TRUE && nrow(temp)>0){
     temp%>%
@@ -262,7 +264,7 @@ calc_pmodel_ecrit <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil){
         
         res_temp <- x %>% 
           bind_cols(res) %>% 
-          # bind_cols(sensi) %>%
+          bind_cols(sensi) %>%
           bind_cols(model_type = "pmodel_ecrit") %>% 
           mutate(E = E*3600*1e-6) #transform to mol m-2soil h-1
         

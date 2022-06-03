@@ -518,7 +518,8 @@ model_numerical <- function(tc, ppfd, vpd, nR, co2, elv, LAI, fapar, kphio, psi_
       jmax=jmax_ar,
       vcmax=vcmax_ar,
       E=dps$E,
-      a=dps$a
+      a=dps$a,
+      low_swp = dps$low_swp
     ))
   }
   
@@ -529,7 +530,8 @@ model_numerical <- function(tc, ppfd, vpd, nR, co2, elv, LAI, fapar, kphio, psi_
       jmax=jmax_ar,
       vcmax=vcmax_ar,
       E=dps$E,
-      a=dps$a
+      a=dps$a,
+      low_swp = dps$low_swp
     ))
   }
   
@@ -540,7 +542,8 @@ model_numerical <- function(tc, ppfd, vpd, nR, co2, elv, LAI, fapar, kphio, psi_
       jmax=jmax_ar,
       vcmax=vcmax_ar,
       E=dps$E,
-      a=dps$a
+      a=dps$a,
+      low_swp = dps$low_swp
     ))
   }
   
@@ -580,7 +583,8 @@ model_numerical <- function(tc, ppfd, vpd, nR, co2, elv, LAI, fapar, kphio, psi_
       ci=ci,
       chi = ci/par_photosynth$ca,
       vcmax=vcmax,
-      chi_jmax_lim = 0
+      chi_jmax_lim = 0,
+      low_swp = low_swp
     ))
   }
   

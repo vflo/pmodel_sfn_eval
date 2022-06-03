@@ -1,7 +1,7 @@
 source("init_PREPARE_DATA_LIST.R")
 
 #### MODEL CALCULATION ####
-as.list(flx_files$sfn_sites)[[134]] %>%
+as.list(flx_files$sfn_sites)[[174]] %>%
   purrr::map(function(x){
     #load SAPFLUXNET site and aggregation at daily level
     sfn <- read_sfn_data(x, folder = path) %>%
@@ -90,6 +90,12 @@ as.list(flx_files$sfn_sites)[[134]] %>%
       left_join(sw_ERA5,by = c("si_code", "TIMESTAMP_daylight")) %>% 
       mutate(sw_ERA5 = sw_ERA5_18/2) # transform into mean daily value (divide by two to account for night value)
     
+    #join elevation and set it if NA
+    sfn <- sfn %>% 
+      left_join(elevation %>% dplyr::select(si_code, elevation),by = c("si_code")) %>% 
+      mutate(si_elev = case_when(is.na(si_elev) ~ elevation,
+                                 TRUE ~ si_elev)) %>% 
+      dplyr::select(-elevation)
     
     #join tree height
     sfn <- sfn %>% 
