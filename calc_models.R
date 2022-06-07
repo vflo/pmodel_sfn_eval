@@ -1,5 +1,5 @@
 #### PMODEL MODEL ####
-calc_pmodel <- function(df_temp){
+calc_pmodel <- function(df_temp, soil, par_plant){
   df_temp %>% 
     split(seq(nrow(.))) %>%
     purrr::map_df(function(x){
@@ -12,9 +12,16 @@ calc_pmodel <- function(df_temp){
                               ppfd = x$ppfd_in/1e6, do_soilmstress = FALSE, elv=x$si_elev %>% unique()) %>% 
         as_tibble()
       
+      if(any(is.na(par_plant$conductivity),!is.na(par_plant$d),!is.na(par_plant$c),!is.na(par_plant$height))){
+        psi_l <- get_p(psi_soil, 1.6*res$gs*(x$vpd*1000), par_plant$conductivity*1e-3*x$LAI, par_plant$d, par_plant$c, par_plant$height)
+      }else{
+        psi_l <- NA
+      }
+      
       res_temp <- x %>% 
         bind_cols(low_swp = FALSE) %>% 
-        bind_cols(res) %>% 
+        bind_cols(res) %>%
+        bind_cols(psi_l = psi_l) %>%
         bind_cols(psi_soil = psi_soil) %>%
         bind_cols(model_type = "pmodel") %>% 
         mutate(E = 1.6*gs*(vpd*1000)*3600) #mol m-2 h-1
@@ -23,7 +30,7 @@ calc_pmodel <- function(df_temp){
 }
 
 #### PMODEL SWC LIMITATION MODEL ####
-calc_pmodel_swc <- function(df_temp, meanalpha, soil){
+calc_pmodel_swc <- function(df_temp, meanalpha, soil, par_plant){
   if(!is.na(meanalpha)){
     df_temp %>% 
       split(seq(nrow(.)))%>%
@@ -35,12 +42,20 @@ calc_pmodel_swc <- function(df_temp, meanalpha, soil){
                                       model = "SX")
         FC <- medfate::soil_thetaFC(medfate::soil(tibble(widths = x$st_soil_depth*10, clay = x$st_clay_perc, 
                                                          sand = x$st_sand_perc, om = soil$OM, bd = soil$bd, rfc = 70)))
-        res <- rpmodel::rpmodel(tc=x$ta, vpd=x$vpd*1000, co2=x$CO2, fapar=x$FAPAR, ppfd = x$ppfd_in/1e6, soilm =x$swvl/FC,
+        res <- rpmodel::rpmodel(tc=x$ta, vpd=x$vpd*1000, co2=x$CO2, fapar=x$FAPAR, ppfd = x$ppfd_in/1e6, soilm =x$REW,
                                 do_soilmstress = TRUE, elv=x$si_elev %>% unique(), meanalpha = meanalpha) %>% 
           as_tibble()
+        
+        if(any(is.na(par_plant$conductivity),!is.na(par_plant$d),!is.na(par_plant$c),!is.na(par_plant$height))){
+          psi_l <- get_p(psi_soil, 1.6*res$gs*(x$vpd*1000), par_plant$conductivity*1e-3*x$LAI, par_plant$d, par_plant$c, par_plant$height)
+        }else{
+            psi_l <- NA
+            }
+
         res_temp <- x %>% 
           bind_cols(low_swp = FALSE) %>% 
           bind_cols(res) %>% 
+          bind_cols(psi_l = psi_l) %>%
           bind_cols(psi_soil = psi_soil) %>%
           bind_cols(model_type = "pmodel_swc") %>% 
           mutate(E = 1.6*gs*(vpd*1000)*3600, #mol m-2 h-1
@@ -51,14 +66,14 @@ calc_pmodel_swc <- function(df_temp, meanalpha, soil){
 }
 
 #### PHYDRO MODEL ####
-calc_phydro <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil, sensi){
+calc_phydro <- function(df_temp, PHYDRO_TRUE, par_plant, soil, sensi){
   #filter
   temp <- df_temp %>%  
     filter(!is.na(ta),!is.na(FAPAR),!is.na(ppfd_in), !is.na(vpd),FAPAR > 0, ppfd_in > 0, LAI>0, swvl > 0.01)
   
   #sensitivity analysis
-  par_plant_std$psi50 <- par_plant_std$psi50 * sensi$sensitivity_psi
-  par_plant_std$conductivity <- par_plant_std$conductivity * sensi$sensitivity_K
+  par_plant$psi50 <- par_plant$psi50 * sensi$sensitivity_psi
+  par_plant$conductivity <- par_plant$conductivity * sensi$sensitivity_K
   
   if(PHYDRO_TRUE && nrow(temp)>0){
     temp%>%
@@ -71,7 +86,7 @@ calc_phydro <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil, sensi){
                                                     W =x$swvl/soil_thetaSATSX(clay = x$st_clay_perc, sand = x$st_sand_perc, om = soil$OM)), 
                                       model = "SX")
         res <- model_numerical(tc = x$ta, 
-                               ppfd =x$ppfd_in/x$LAI, 
+                               ppfd =x$ppfd_in, 
                                vpd = x$vpd*1000, 
                                nR =x$netrad, 
                                co2=x$CO2, 
@@ -80,16 +95,23 @@ calc_phydro <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil, sensi){
                                fapar = (x$FAPAR),
                                kphio = calc_ftemp_kphio(x$ta), 
                                psi_soil = psi_soil, 
-                               par_plant = par_plant_std,
+                               par_plant = par_plant,
                                stomatal_model = "phydro") %>% 
           as_tibble()
+        
+        if(any(is.na(par_plant$conductivity),!is.na(par_plant$d),!is.na(par_plant$c),!is.na(par_plant$height))){
+          psi_l <- get_p(psi_soil, res$E, par_plant$conductivity*1e-3*x$LAI, par_plant$d, par_plant$c, par_plant$height)
+        }else{
+          psi_l <- NA
+        }
         
         res_temp <- x %>% 
           bind_cols(res) %>% 
           bind_cols(sensi) %>%
+          bind_cols(psi_l = psi_l) %>%
           bind_cols(psi_soil = psi_soil) %>%
           bind_cols(model_type = "phydro") %>% 
-          mutate(E = E*3600*LAI) #transform to mol m-2soil h-1
+          mutate(E = E*3600) #transform to mol m-2 (ground) h-1
         
         return(res_temp)
       })
@@ -100,14 +122,14 @@ calc_phydro <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil, sensi){
 } 
 
 #### SPERRY MODEL ####
-calc_sperry <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil, sensi){
+calc_sperry <- function(df_temp, PHYDRO_TRUE, par_plant, soil, sensi){
   #filter
   temp <- df_temp %>%  
     filter(!is.na(ta),!is.na(FAPAR),!is.na(ppfd_in), !is.na(vpd),FAPAR > 0, ppfd_in > 0, LAI>0, swvl > 0.01)
   
   #sensitivity analysis
-  par_plant_std$d <- par_plant_std$d * sensi$sensitivity_psi
-  par_plant_std$conductivity <- par_plant_std$conductivity * sensi$sensitivity_K
+  par_plant$d <- par_plant$d * sensi$sensitivity_psi
+  par_plant$conductivity <- par_plant$conductivity * sensi$sensitivity_K
   
   if(PHYDRO_TRUE && nrow(temp)>0){
     temp%>%
@@ -120,7 +142,7 @@ calc_sperry <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil, sensi){
                                                     W =x$swvl/soil_thetaSATSX(clay = x$st_clay_perc, sand = x$st_sand_perc, om = soil$OM)), 
                                       model = "SX")
         res <- model_numerical(tc = x$ta, 
-                               ppfd =x$ppfd_in/x$LAI, 
+                               ppfd =x$ppfd_in, 
                                vpd = x$vpd*1000,
                                nR=x$netrad, 
                                co2=x$CO2, 
@@ -130,16 +152,23 @@ calc_sperry <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil, sensi){
                                kphio = calc_ftemp_kphio(x$ta), 
                                psi_soil = psi_soil, 
                                # rdark = 0, 
-                               par_plant = par_plant_std, 
+                               par_plant = par_plant, 
                                stomatal_model = "sperry") %>% 
           as_tibble()
+        
+        if(any(is.na(par_plant$conductivity),!is.na(par_plant$d),!is.na(par_plant$c),!is.na(par_plant$height))){
+          psi_l <- get_p(psi_soil, res$E, par_plant$conductivity*1e-3*x$LAI, par_plant$d, par_plant$c, par_plant$height)
+        }else{
+          psi_l <- NA
+        }
         
         res_temp <- x %>% 
           bind_cols(res) %>% 
           bind_cols(sensi) %>%
+          bind_cols(psi_l = psi_l) %>%
           bind_cols(psi_soil = psi_soil) %>%
           bind_cols(model_type = "sperry") %>% 
-          mutate(E = E/1e3*3600*LAI) #transform to mol m-2soil h-1
+          mutate(E = E*3600) #transform to mol m-2 (ground) h-1
         return(res_temp)
       })
   }else{
@@ -149,14 +178,14 @@ calc_sperry <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil, sensi){
 } 
 
 #### WANG MODEL ####
-calc_wang <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil, sensi){
+calc_wang <- function(df_temp, PHYDRO_TRUE, par_plant, soil, sensi){
   #filter
   temp <- df_temp %>%  
     filter(!is.na(ta),!is.na(FAPAR),!is.na(ppfd_in), !is.na(vpd),FAPAR > 0, ppfd_in > 0, LAI>0, swvl > 0.01)
   
   #sensitivity analysis
-  par_plant_std$d <- par_plant_std$d * sensi$sensitivity_psi
-  par_plant_std$conductivity <- par_plant_std$conductivity * sensi$sensitivity_K
+  par_plant$d <- par_plant$d * sensi$sensitivity_psi
+  par_plant$conductivity <- par_plant$conductivity * sensi$sensitivity_K
   
   if(PHYDRO_TRUE && nrow(temp)>0){
     temp%>%
@@ -169,7 +198,7 @@ calc_wang <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil, sensi){
                                                     W =x$swvl/soil_thetaSATSX(clay = x$st_clay_perc, sand = x$st_sand_perc, om = soil$OM)), 
                                       model = "SX")
         res <- model_numerical(tc = x$ta, 
-                               ppfd =x$ppfd_in/x$LAI, 
+                               ppfd =x$ppfd_in, 
                                vpd = x$vpd*1000,
                                nR=x$netrad, 
                                co2=x$CO2, 
@@ -179,16 +208,23 @@ calc_wang <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil, sensi){
                                kphio = calc_ftemp_kphio(x$ta), 
                                psi_soil = psi_soil, 
                                # rdark = 0, 
-                               par_plant = par_plant_std, 
+                               par_plant = par_plant, 
                                stomatal_model = "wang") %>% 
           as_tibble()
+        
+        if(any(is.na(par_plant$conductivity),!is.na(par_plant$d),!is.na(par_plant$c),!is.na(par_plant$height))){
+          psi_l <- get_p(psi_soil, res$E, par_plant$conductivity*1e-3*x$LAI, par_plant$d, par_plant$c, par_plant$height)
+        }else{
+          psi_l <- NA
+        }
         
         res_temp <- x %>% 
           bind_cols(res) %>% 
           bind_cols(sensi) %>%
+          bind_cols(psi_l = psi_l) %>%
           bind_cols(psi_soil = psi_soil) %>%
           bind_cols(model_type = "wang") %>% 
-          mutate(E = E/1e3*3600*LAI)#transform to mol m-2soil h-1
+          mutate(E = E*3600)#transform to mol m-2 (ground) h-1
         
         return(res_temp)
       })
@@ -200,14 +236,14 @@ calc_wang <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil, sensi){
 
 
 #### WAP MODEL ####
-calc_wap <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil, sensi){
+calc_wap <- function(df_temp, PHYDRO_TRUE, par_plant, soil, sensi){
   #filter
   temp <- df_temp %>%  
     filter(!is.na(ta),!is.na(FAPAR),!is.na(ppfd_in), !is.na(vpd),FAPAR > 0, ppfd_in > 0, LAI>0, swvl > 0.01)
   
   #sensitivity analysis
-  par_plant_std$d <- par_plant_std$d * sensi$sensitivity_psi
-  par_plant_std$conductivity <- par_plant_std$conductivity * sensi$sensitivity_K
+  par_plant$d <- par_plant$d * sensi$sensitivity_psi
+  par_plant$conductivity <- par_plant$conductivity * sensi$sensitivity_K
   
   if(PHYDRO_TRUE && nrow(temp)>0){
     temp%>%
@@ -220,7 +256,7 @@ calc_wap <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil, sensi){
                                                     W =x$swvl/soil_thetaSATSX(clay = x$st_clay_perc, sand = x$st_sand_perc, om = soil$OM)), 
                                       model = "SX")
         res <- model_numerical(tc = x$ta, 
-                               ppfd =x$ppfd_in/x$LAI, 
+                               ppfd =x$ppfd_in, 
                                vpd = x$vpd*1000,
                                nR=x$netrad, 
                                co2=x$CO2, 
@@ -230,16 +266,23 @@ calc_wap <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil, sensi){
                                kphio = calc_ftemp_kphio(x$ta), 
                                psi_soil = psi_soil, 
                                # rdark = 0, 
-                               par_plant = par_plant_std, 
+                               par_plant = par_plant, 
                                stomatal_model = "wap") %>% 
           as_tibble()
+        
+        if(any(is.na(par_plant$conductivity),!is.na(par_plant$d),!is.na(par_plant$c),!is.na(par_plant$height))){
+          psi_l <- get_p(psi_soil, res$E, par_plant$conductivity*1e-3*x$LAI, par_plant$d, par_plant$c, par_plant$height)
+        }else{
+          psi_l <- NA
+        }
         
         res_temp <- x %>% 
           bind_cols(res) %>% 
           bind_cols(sensi) %>% 
+          bind_cols(psi_l = psi_l) %>%
           bind_cols(psi_soil = psi_soil) %>%
           bind_cols(model_type = "wap") %>% 
-          mutate(E = E /1e3*3600*LAI)  #transform to mol m-2soil h-1
+          mutate(E = E*3600)  #transform to mol m-2 (ground) h-1
         
         return(res_temp)
       })
@@ -254,14 +297,14 @@ calc_wap <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil, sensi){
 
 
 #### PMODEL ECRIT ####
-calc_pmodel_ecrit <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil, sensi){
+calc_pmodel_ecrit <- function(df_temp, PHYDRO_TRUE, par_plant, soil, sensi){
   #filter
   temp <- df_temp %>%  
     filter(!is.na(ta),!is.na(FAPAR),!is.na(ppfd_in), !is.na(vpd),FAPAR > 0, ppfd_in > 0, LAI>0, swvl > 0.01)
   
   #sensitivity analysis
-  par_plant_std$psi50 <- par_plant_std$psi50 * sensi$sensitivity_psi
-  par_plant_std$conductivity <- par_plant_std$conductivity * sensi$sensitivity_K
+  par_plant$psi50 <- par_plant$psi50 * sensi$sensitivity_psi
+  par_plant$conductivity <- par_plant$conductivity * sensi$sensitivity_K
   
   if(PHYDRO_TRUE && nrow(temp)>0){
     temp%>%
@@ -274,21 +317,28 @@ calc_pmodel_ecrit <- function(df_temp, PHYDRO_TRUE, par_plant_std, soil, sensi){
                                                     W =x$swvl/soil_thetaSATSX(clay = x$st_clay_perc, sand = x$st_sand_perc, om = soil$OM)), 
                                       model = "SX")
         res <- rpmodel_ecrit(tc=x$ta, vpd=x$vpd*1000, co2=x$CO2, fapar=x$FAPAR, psi_soil = psi_soil,
-                             K = par_plant_std$conductivity, d = par_plant_std$d, c = par_plant_std$c, h = par_plant_std$height,
-                             rs = 0.1, LAI = x$LAI, ppfd = x$ppfd_in, do_soilmstress = FALSE, elv=x$si_elev %>% unique()) %>% 
+                             K = par_plant$conductivity, d = par_plant$d, c = par_plant$c, h = par_plant$height,
+                             rs = 0.1, LAI = x$LAI, ppfd = x$ppfd_in/1e6, do_soilmstress = FALSE, elv=x$si_elev %>% unique()) %>% 
           as_tibble()
+        
+        
+        if(any(is.na(par_plant$conductivity),!is.na(par_plant$d),!is.na(par_plant$c),!is.na(par_plant$height))){
+          psi_l <- get_p(psi_soil, 1.6*res$gs*(x$vpd*1000), par_plant$conductivity*1e-3*x$LAI, par_plant$d, par_plant$c, par_plant$height)
+        }else{
+          psi_l <- NA
+        }
         
         res_temp <- x %>% 
           bind_cols(res) %>% 
           bind_cols(sensi) %>%
           bind_cols(psi_soil = psi_soil) %>%
           bind_cols(model_type = "pmodel_ecrit") %>% 
-          mutate(E = E*3600*1e-6) #transform to mol m-2soil h-1
+          mutate(E = 1.6*gs*(vpd*1000)*3600) #transform to mol m-2 (ground) h-1
         
         return(res_temp)
       })
   }else{
-    df_temp; print("PHYDRO model was not computed")
+    df_temp; print("Pmodel ecrit was not computed")
     return(temp)
   }
 } 

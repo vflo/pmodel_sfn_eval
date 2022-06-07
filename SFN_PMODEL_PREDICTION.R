@@ -41,11 +41,11 @@ as.list(list_files)[-c(1:159)] %>%
   #### MODEL CALCULATION ####
   ## PMODEL ##
     print("Calculating PMODEL")
-    pmodel <- calc_pmodel(df)%>% as_tibble()
+    pmodel <- calc_pmodel(df, soil, par_plant_std)%>% as_tibble()
 
   # PMODEL SWC limitation if there is AET/PET then calculate it
     print("Calculating PMODEL with swc limitation")
-    pmodel_swc <- calc_pmodel_swc(df, meanalpha, soil)%>% as_tibble()
+    pmodel_swc <- calc_pmodel_swc(df, meanalpha, soil, par_plant_std)%>% as_tibble()
 
   # PHydro if there is species information 
     print("Calculating PHYDRO")
@@ -57,7 +57,7 @@ as.list(list_files)[-c(1:159)] %>%
     
   # Sperry model
     print("Calculating SPERRY model")
-    sensitivity %>% 
+    sensitivity[1,] %>% 
       split(seq(nrow(.)))%>%
       purrr::map(function(x){
         calc_sperry(df, PHYDRO_TRUE, par_plant_std, soil,x) %>% as_tibble()
@@ -65,7 +65,7 @@ as.list(list_files)[-c(1:159)] %>%
     
   # Wang model
     print("Calculating WANG model")
-    sensitivity %>% 
+    sensitivity[1,]%>% 
       split(seq(nrow(.)))%>%
       purrr::map(function(x){
         calc_wang(df, PHYDRO_TRUE, par_plant_std, soil,x) %>% as_tibble()
@@ -73,7 +73,7 @@ as.list(list_files)[-c(1:159)] %>%
     
   # Wap model
     print("Calculating WAP model")
-    sensitivity %>% 
+    sensitivity[1,] %>% 
       split(seq(nrow(.)))%>%
       purrr::map(function(x){
         calc_wap(df, PHYDRO_TRUE, par_plant_std, soil,x) %>% as_tibble()
@@ -81,7 +81,7 @@ as.list(list_files)[-c(1:159)] %>%
     
     ## PMODEL Ecrit ##
     print("Calculating PMODEL Ecrit")
-    sensitivity %>% 
+    sensitivity[1,] %>% 
       split(seq(nrow(.)))%>%
       purrr::map(function(x){
         calc_pmodel_ecrit(df, PHYDRO_TRUE, par_plant_std, soil,x)%>% as_tibble()

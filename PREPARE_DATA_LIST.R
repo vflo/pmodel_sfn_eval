@@ -29,7 +29,10 @@ as.list(flx_files$sfn_sites)[[174]] %>%
     #join soil water content from ERA5-land
     # df_swc <- dist_merge(df_swc, sfn %>% select(si_code,si_lat,si_long) %>% unique(), 'si_lat', 'si_long', 'si_lat', 'si_long')
     sfn <- sfn %>% 
-      left_join(df_swc, by=c("TIMESTAMP","si_code"))
+      left_join(df_swc%>%
+                  group_by(si_code) %>% 
+                  mutate(max_swvl = max(swvl2, na.rm = TRUE)), 
+                by=c("TIMESTAMP","si_code")) 
     
     #if there is no column add it filled with NA
     sfn <- add_miss_var(sfn)
