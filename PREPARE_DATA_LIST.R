@@ -1,7 +1,7 @@
 source("init_PREPARE_DATA_LIST.R")
 
 #### MODEL CALCULATION ####
-as.list(flx_files$sfn_sites)[[174]] %>%
+as.list(flx_files$sfn_sites)[[2]] %>%
   purrr::map(function(x){
     #load SAPFLUXNET site and aggregation at daily level
     sfn <- read_sfn_data(x, folder = path) %>%
@@ -130,7 +130,7 @@ as.list(flx_files$sfn_sites)[[174]] %>%
     PHYDRO_TRUE <- FALSE
     par_plant_std <- sp_params(sfn, SpParams)
     if(!is.null(par_plant_std)){
-      if(!is.na(par_plant_std$psi50)){
+      if(!is.na(par_plant_std$psi50) & !is.na(par_plant_std$K)){
         PHYDRO_TRUE <- TRUE
       }
     }

@@ -50,30 +50,30 @@ include_fapar_lai <- function(sfn, fapar_noaa, fapar){
   min_data = min(fapar_filled$TIMESTAMP)
 
 # Build FAPAR model
-  # model_fapar <- qgam(Fapar ~ s(TIMESTAMP, bs = 'tp', k = 180), data = fapar_filled %>% 
-  #                       dplyr::select(TIMESTAMP,Fapar) %>% 
-  #                       mutate(TIMESTAMP = TIMESTAMP %>% 
-  #                                as.numeric()), qu = 0.5)
-  # model_lai <- qgam(Lai ~ s(TIMESTAMP, bs = 'tp', k = 180), data = fapar_filled %>%
-  #                     dplyr::select(TIMESTAMP,Lai) %>% 
-  #                     mutate(TIMESTAMP = TIMESTAMP %>% 
-  #                              as.numeric()), qu = 0.5)
-  x <- fapar_filled$TIMESTAMP %>% as.numeric()
-  y_fapar <- fapar_filled$Fapar
-  y_lai <- fapar_filled$Lai
-  model_fapar <- GauPro(x, y_fapar, parallel=TRUE)
-  model_lai <- GauPro(x, y_lai, parallel=TRUE)
-
-  
-  pred_FAPAR <- model_fapar$pred(sfn[,"TIMESTAMP"] %>% 
-                          mutate(TIMESTAMP = as.numeric(lubridate::ymd(TIMESTAMP)))%>% 
-                          unique() %>% 
-                          pull())
-  pred_LAI <- model_lai$pred(sfn[,"TIMESTAMP"] %>%
-                               mutate(TIMESTAMP = as.numeric(lubridate::ymd(TIMESTAMP)))%>% 
-                               unique() %>% 
-                               pull())
-
+  model_fapar <- qgam(Fapar ~ s(TIMESTAMP, bs = 'tp', k = 180), data = fapar_filled %>%
+                        dplyr::select(TIMESTAMP,Fapar) %>%
+                        mutate(TIMESTAMP = TIMESTAMP %>%
+                                 as.numeric()), qu = 0.5)
+  model_lai <- qgam(Lai ~ s(TIMESTAMP, bs = 'tp', k = 180), data = fapar_filled %>%
+                      dplyr::select(TIMESTAMP,Lai) %>%
+                      mutate(TIMESTAMP = TIMESTAMP %>%
+                               as.numeric()), qu = 0.5)
+  # x <- fapar_filled$TIMESTAMP %>% as.numeric()
+  # y_fapar <- fapar_filled$Fapar
+  # y_lai <- fapar_filled$Lai
+  # model_fapar <- GauPro(x, y_fapar, parallel=TRUE)
+  # model_lai <- GauPro(x, y_lai, parallel=TRUE)
+  # 
+  # pred_FAPAR <- model_fapar$pred(sfn[,"TIMESTAMP"] %>% 
+  #                         mutate(TIMESTAMP = as.numeric(lubridate::ymd(TIMESTAMP)))%>% 
+  #                         unique() %>% 
+  #                         pull())
+  # pred_LAI <- model_lai$pred(sfn[,"TIMESTAMP"] %>%
+  #                              mutate(TIMESTAMP = as.numeric(lubridate::ymd(TIMESTAMP)))%>% 
+  #                              unique() %>% 
+  #                              pull())
+  pred_FAPAR <- predict(model_fapar, tibble(TIMESTAMP = sfn[,"TIMESTAMP"] %>%mutate(TIMESTAMP = as.numeric(lubridate::ymd(TIMESTAMP)))%>% unique() %>% pull()))
+  pred_LAI <- predict(model_lai, tibble(TIMESTAMP = sfn[,"TIMESTAMP"] %>%mutate(TIMESTAMP = as.numeric(lubridate::ymd(TIMESTAMP)))%>% unique() %>% pull()))
 
   sfn %>% 
     left_join(tibble(TIMESTAMP = sfn$TIMESTAMP %>% 
@@ -106,19 +106,24 @@ sp_params <- function(sfn, SpParams){
       purrr::map(do_phydro_params, sfn = sfn, visco = visco, density = density) %>% bind_rows() -> par_plant_std
   
     par_plant_std <- par_plant_std %>% 
-      summarise(v_huber = weighted.mean(v_huber, sp_basal_area),
+      summarise(st_basal_area = weighted.mean(st_basal_area, sp_basal_area),
+                pl_sapw_area = weighted.mean(pl_sapw_area, sp_basal_area, na.rm = TRUE),
+                pl_ba = weighted.mean(plant_ba, sp_basal_area, na.rm = TRUE),
+                # v_huber = weighted.mean(v_huber, sp_basal_area),
                 height = weighted.mean(height, sp_basal_area),
                 LAI = weighted.mean(LAI, sp_basal_area),
-                conductivity = weighted.mean(conductivity, sp_basal_area),
+                conductivity = weighted.mean(conductivity, sp_basal_area), #Kg m-1 s-1 MPa
                 conductivity_Kl = weighted.mean(conductivity_Kl, sp_basal_area),
                 psi50 = weighted.mean(psi50, sp_basal_area),
                 b = weighted.mean(b, sp_basal_area),
                 c = weighted.mean(c, sp_basal_area),
                 d = weighted.mean(d, sp_basal_area),
                 v25 = weighted.mean(v25, sp_basal_area),
-                j25 = weighted.mean(j25, sp_basal_area))
+                j25 = weighted.mean(j25, sp_basal_area),
+                sp_basal_area = sum(sp_basal_area)) %>% 
+      mutate(K = conductivity/height*55.5*pl_sapw_area/pl_ba*st_basal_area*1e-4)#mol m-2(ground) s-1 MPa-1
   
-    if(is.na(unique(par_plant_std$height))){par_plant_std$height <- unique(sfn$st_height)}
+    # if(is.na(unique(par_plant_std$height))){par_plant_std$height <- unique(sfn$st_height)}
   
   }
   
@@ -194,8 +199,8 @@ data_prep <- function(df_sfn, env, opt_swc){
   bind_cols(tibble(opt_swc_slope = opt_swc[1],opt_swc_int =  opt_swc[2])) %>% 
   # filter(!is.na(E_stand)) %>% 
   # filter(lubridate::date(TIMESTAMP) >= lubridate::ymd(20140101), lubridate::date(TIMESTAMP) < lubridate::ymd(20150101)) %>%
-  mutate(E_sapflow= E_stand/18.2, #mol m-2 h-1
-         E_sapflow_sd= E_stand_sd/18.2, #mol m-2 h-1
+  mutate(E_sapflow = E_stand/18.2, #mol m-2 h-1
+         E_sapflow_sd = E_stand_sd/18.2, #mol m-2 h-1
          PPFD = PPFD*1e6/86400,
          ppfd_ERA5 = sw_ERA5 * 2.114, #transform sw ERA5 to ppfd
          netr = netr*1e6/86400,
@@ -215,7 +220,10 @@ data_prep <- function(df_sfn, env, opt_swc){
          netrad = case_when(is.na(netrad)~ netr,
                             !is.na(netrad)~ netrad),
          CO2 = case_when(is.na(CO2) ~ 400,
-                         !is.na(CO2) ~ CO2)) %>% 
+                         !is.na(CO2) ~ CO2),
+         patm = rpmodel::calc_patm(si_elev),
+         Gs_sapflow = E_sapflow / (vpd*1000) / 1.6 / 3600*1e6, #umol m-2(ground) s-1 Pa-1
+         Gs_sapflow_sd = E_sapflow_sd / (vpd*1000) / 1.6 / 3600*1e6) %>% 
   filter(!is.na(REW))->df
 
 # fit_ws <- lm(ws~0+ws_ERA, data =df) %>% summary()

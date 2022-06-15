@@ -104,82 +104,78 @@ GetPhotosyntheticVcmax <- function(vcmax25, tem){
   }
 
 
-calc_assimilation_limiting_max = function(vcmax, jmax, v25, gs_min, gs_crit, par_photosynth, par_env){
-  A <- tibble::tibble(ci=NA,a=NA)
-  gs <- seq(gs_crit, gs_min, length.out = 100)
-  for (i in 1:100){
-    
-    # We need not employ numerical root-finding. calculate chi independently assuming Ac and Aj, and bigger of the two will be the limiting one. Accordingly return Ac or Aj
-    Ac = calc_assim_rubisco_limited(gs = gs[i], vcmax = vcmax, par_photosynth = par_photosynth, v25 = v25, par_env = par_env)
-    Aj = calc_assim_light_limited(gs = gs[i], jmax = jmax, par_photosynth = par_photosynth, v25 = v25, par_env = par_env)
-    A[i,'ac'] = Ac$a
-    A[i,'aj'] = Aj$a
-    
-    if (Ac$ci > Aj$ci ){
-      A[i,'ci'] = Ac$ci
-      A[i,'a']  = Ac$a
-    } else {
-      A[i,'ci'] = Aj$ci
-      A[i,'a']  = Aj$a
-    }
-  }
-  A[which(A$a == max(A$a)),]
-}
-
-
-calc_assimilation_limiting <- function (vcmax, jmax, gs, par_photosynth, v25, par_env) {
-  Ac = calc_assim_rubisco_limited(gs = gs, vcmax = vcmax, 
-                                  par_photosynth = par_photosynth,
-                                  v25 = v25, par_env = par_env)
-  Aj = calc_assim_light_limited(gs = gs, jmax = jmax, par_photosynth = par_photosynth, v25 = v25, par_env = par_env)
-  A = list(ac = Ac$a, aj = Aj$a)
-  if (Ac$ci > Aj$ci) {
+calc_assimilation_limiting = function(vcmax, jmax, gs, par_photosynth){
+  # gs = calc_gs(dpsi, psi_soil, par_plant = par_plant, par_env = par_env)
+  
+  # We need not employ numerical root-finding. calculate chi independently assuming Ac and Aj, and bigger of the two will be the limiting one. Accordingly return Ac or Aj
+  Ac = calc_assim_rubisco_limited(gs = gs, vcmax = vcmax, par_photosynth = par_photosynth)
+  Aj = calc_assim_light_limited(gs = gs, jmax = jmax, par_photosynth = par_photosynth)
+  
+  A = list(ac = Ac$a, aj=Aj$a)
+  
+  if (Ac$ci > Aj$ci ){
     A$ci = Ac$ci
-    A$a = Ac$a
-  }
-  else {
+    A$a  = Ac$a
+  } else {
     A$ci = Aj$ci
-    A$a = Aj$a
+    A$a  = Aj$a
   }
+  
   A
 }
 
 
-calc_assim_rubisco_limited <- function (gs, vcmax, par_photosynth, v25, par_env){
-  tem <- par_env$tc
-  ca = par_photosynth$ca
-  gs = gs * 1e+06/par_photosynth$patm # umol(co2) m-2(leaf) s-1 Pa-1
-  # d = v25 * 0.01 *  2.0**(0.1*(tem-25.0)) / (1.0+exp(1.3*(tem-55.0))) # day respiration as f(temperature)
+calc_assim_rubisco_limited <- function(gs, vcmax, par_photosynth){
+  
+  ca = par_photosynth$ca             # ca is in Pa
+  gs = gs * 1e6/par_photosynth$patm  # convert to umol/m2/s/Pa
+  
   d = par_photosynth$delta
-  A <- -1 * gs
-  B <- gs * ca - gs * par_photosynth$kmm - vcmax * (1 - d)
-  C <- gs * ca * par_photosynth$kmm + vcmax * (par_photosynth$gammastar + 
-                                                 par_photosynth$kmm * d)
+  ## with
+  A <- -1.0 * gs
+  B <- gs * ca - gs * par_photosynth$kmm - vcmax*(1-d)
+  C <- gs * ca * par_photosynth$kmm + vcmax * (par_photosynth$gammastar + par_photosynth$kmm*d)
+  
   ci <- QUADM(A, B, C)
-  a_c <- gs * (ca - ci)
-  return(list(a = a_c, ci = ci))
+  # a_c <- vcmax * (ci - par$gammastar) / (ci + par$kmm)
+  a_c <- gs*(ca-ci) 
+  
+  return(list(a=a_c, ci=ci))
 }
 
 
-calc_assim_light_limited <- function (gs, jmax, par_photosynth, v25, par_env){
-  tem <- par_env$tc
-  ca = par_photosynth$ca
-  gs = gs * 1e+06/par_photosynth$patm # umol(co2) m-2(leaf) s-1 Pa-1
+calc_assim_light_limited <- function(gs, jmax, par_photosynth){
+  
+  ## Only light is limiting
+  ## Solve Eq. system
+  ## A = gs (ca- ci)
+  ## A = phi0 * Iabs * jlim * (ci - gammastar)/(ci + 2*gamma_star)
+  
+  ## This leads to a quadratic equation:
+  ## A * ci^2 + B * ci + C  = 0
+  ## 0 = a + b*x + c*x^2
+  
+  ca = par_photosynth$ca             # ca is in Pa
+  gs = gs * 1e6/par_photosynth$patm  # convert to umol/m2/s/Pa
+  
   phi0iabs = par_photosynth$phi0 * par_photosynth$Iabs
-  jlim = phi0iabs/sqrt(1 + (4 * phi0iabs/jmax)^2)
-  # d = v25 * 0.01 *  2.0**(0.1*(tem-25.0)) / (1.0+exp(1.3*(tem-55.0))) # day respiration as f(temperature)
-  d = par_photosynth$delta
-  A <- -1 * gs
-  B <- gs * ca - gs * 2 * par_photosynth$gammastar - jlim * (1 - d)
-  C <- gs * ca * 2 * par_photosynth$gammastar + jlim * (par_photosynth$gammastar + d * par_photosynth$kmm)
+  jlim = phi0iabs / sqrt(1+ (4*phi0iabs/jmax)^2)
+  
+  d = par_photosynth$delta 
+  ## with
+  A <- -1.0 * gs
+  B <- gs * ca - gs * 2 * par_photosynth$gammastar - jlim*(1-d)
+  C <- gs * ca * 2*par_photosynth$gammastar + jlim * (par_photosynth$gammastar + d*par_photosynth$kmm)
+  
   ci <- QUADM(A, B, C)
-  aj <- gs * (ca - ci)
-  return(list(a = aj, ci = ci))
+  aj <- gs*(ca-ci)
+  # vcmax_pot <- a*(ci + par$kmm)/(ci - par$gammastar)
+  
+  return(list(a=aj, ci=ci))
 }
 
-calc_vcmax_coordinated_numerical <-  function(aj, ci, par_photosynth, v25, par_env){
-  tem <- par_env$tc
-  # d = v25 * 0.01 *  2.0**(0.1*(tem-25.0)) / (1.0+exp(1.3*(tem-55.0))) # day respiration as f(temperature)
+
+calc_vcmax_coordinated_numerical <-  function(aj, ci, par_photosynth){
   d = par_photosynth$delta
   vcmax_coord = aj*(ci + par_photosynth$kmm)/(ci*(1-d) - (par_photosynth$gammastar+par_photosynth$kmm*d))
   return(vcmax_coord)
@@ -189,8 +185,17 @@ calc_vcmax_coordinated_numerical <-  function(aj, ci, par_photosynth, v25, par_e
 ###########################################
 ## HYDRAULIC FUNCTIONS
 ###########################################
+huber_value <- function(par_env, par_plant){
+  par_plant$pl_sapw_area / par_plant$pl_ba * par_plant$st_basal_area * 1e-4 / par_env$LAI
+}
+
 ## Returns conductivity in mol/m2/s/Mpa
-scale_conductivity = function(K, par_env){
+scale_conductivity_ks = function(K, par_env, par_plant, do_backtransform = TRUE){
+  if(do_backtransform){
+  #from Kg m-1 s-1 MPa-1 to m3 m-2
+  K = (K*par_env$viscosity_water*huber_value(par_env, par_plant))/(par_env$density_water*1e6*par_plant$height) #back transform to m3 m-2
+  }
+  
   # Flow rate in m3/m2/s/Pa
   K2 = K / par_env$viscosity_water
   
@@ -204,72 +209,71 @@ scale_conductivity = function(K, par_env){
   return(K4)  
 }
 
-## Returns conductivity in mol/m2/s/Mpa
-scale_conductivity_Ks = function(K, par_env, par_plant){
-  # Flow rate in Kg/m/s/MPa
-  K2 = K / par_plant$height
-  # Flow rate in mol/m2/s/MPa
-  mol_h20_per_kg_h20 = 55.5
-  K3 = K2  * mol_h20_per_kg_h20
-
-  return(K3)  
-}
 
 calc_gs <- function (dpsi, psi_soil, par_plant, par_env, ...){
-  # K = scale_conductivity(par_plant$conductivity, par_env)
-  K = par_plant$conductivity* 1e-3 #mol m-2 (leaf) s-1
+  K = scale_conductivity_ks(par_plant$conductivity, par_env, par_plant, do_backtransform = TRUE) #mol m-2 (leaf) s-1 MPa-1
+  # K = K * par_plant$pl_sapw_area/par_plant$pl_ba*par_plant$st_basal_area*1e-4 #kg m-2 (ground) s-1 MPa-1
+  # K = K * par_env$LAI #kg m-2 (leaf) s-1 MPa-1
   D = (par_env$vpd/par_env$patm)
-  K/1.6/D * -integral_P(dpsi, psi_soil, par_plant$psi50, par_plant$b)
+  # D = par_env$vpd
+  K/1.6/D * -integral_P(dpsi, psi_soil, par_plant$psi50, par_plant$b) #mol m-2 (leaf) s-1
 }
 
 integral_P <- function(dpsi, psi_soil, psi50, b, ...){
   ps = psi_soil/psi50
   pl = (psi_soil-dpsi)/psi50
   l2 = log(2)
-  -(psi50/b)*(l2^(-1/b))*(expint::gammainc(a = 1/b, x = l2*pl^b)-expint::gammainc(a = 1/b, x = l2*ps^b))
+  pl_ = l2*pl^b
+  ps_ = l2*ps^b
+  -(psi50/b)*(l2^(-1/b))*(expint::gammainc(a = 1/b, x = pl_)-expint::gammainc(a = 1/b, x = ps_))
 }
 
 
-get_p <- function(psi_soil, e, K, d, c, h) {
+get_p <- function(psi_soil, e, K, d, c, h, dens_water) {
   dp = 0.0
-  tension = 0
+  psi_soil = -psi_soil
+  tension = psi_soil
   # 3.2 iterate through each layer to get stem dp including gravity
-  for (i in 1:20){
-  p = min(psi_soil, tension)
-  f = exp( -1.0 * (p/d)**c )
-  layer_k = K *20* f
+  for (i in 1:50){
+  p = tension
+  f = exp( -1.0 * (p/-d)^c )
+  layer_k = K *50* f
   layer_k = max(layer_k, 1E-12)
-  dp <-  dp + e / layer_k + 998.0*9.8*h*0.05*1E-6
-  tension = psi_soil - dp
+  dp <-  dp + e / layer_k + dens_water*9.8*h*0.02*1e-6
+  tension = psi_soil + dp
   }
   
-  return(tension)
+  return(-tension)
 }
 
 
-get_e_crit <- function(psi_soil, K, d, c, h){
+get_e_crit <- function(psi_soil, K, d, c, h, dens_water){
   p_crit = d * log(1000.0) ** (1.0/c)
   e_min  = 0.0
   e_max  = 100.0
   e_crit = 50.0
   continue <- TRUE
   while(continue){
-    p = get_p(psi_soil,e_max, K, d, c, h)
+    p = get_p(psi_soil,e_max, K, d, c, h, dens_water)
     if (p>p_crit){
       e_max <-  e_max*2
     }else{
-      continue <- FALSE}}
+      continue <- FALSE
+      }
+    }
   continue <- TRUE
   while(continue){
     e = 0.5 * (e_max+e_min)
-    p = get_p(psi_soil,e, K, d, c, h)
-    if (abs(p-p_crit)<1e-3 | (e_max-e_min)<1e-3){
+    p = get_p(psi_soil,e, K, d, c, h, dens_water)
+    if (abs(p-p_crit)<1e-6 | (e_max-e_min)<1e-6){
       e_crit = e
       continue <- FALSE
     }
     if (p<p_crit){ 
       e_max  = e
-    }else{e_min  = e}
+    }else{
+      e_min  = e
+      }
     
   }
   return (e_crit)
@@ -281,51 +285,61 @@ get_e_crit <- function(psi_soil, K, d, c, h){
 ###########################################
 get_optima_sperry <- function(jmax = jmax, vcmax = vcmax, j25 = j25, v25 = v25, psi_soil, par_photosynth, par_plant, par_env){
   # 1. calculate the p_crit @ layer_f = 1E-6
-  LAI = par_env$LAI
-  K = par_plant$conductivity*LAI*1e-3 #mol m-2 (ground) s-1
-  d = par_plant$d
-  c = par_plant$c
-  h = par_plant$height
-  p_crit = d * log(1000.0) ^ (1.0/c)
+  LAI        = par_env$LAI
+  K          = scale_conductivity_ks(par_plant$conductivity, par_env, par_plant, do_backtransform = TRUE)*LAI #mol m-2 (ground) s-1 MPa-1
+  d          = par_plant$d
+  c          = par_plant$c
+  h          = par_plant$height
+  dens_water = par_env$density_water
+  p_crit     = d * log(1000.0) ^ (1.0/c)
+
+  # 2. if soil psi is lower than p_crit, set soil psi to 98% p_crit 
   low_swp <- FALSE
-  if(psi_soil<=p_crit){psi_soil <- p_crit*0.98
-  low_swp <- TRUE
-  print("WARNING: soil water potential is lower than critical plant water potential.")} #(adjust values if psi soil is less than psi critical)
-  E_crit = get_e_crit(psi_soil, K, d, c, h) #mol m-2 (ground) s-1
-  de = 0.1
-  # 2. increase the e stepwise
-  list_e = vector("list", 1000)
-  list_k = vector("list", 1000)
-  list_a = vector("list", 1000)
-  list_p = vector("list", 1000)
-  list_ci = vector("list", 1000)
-  for(i in 1:1000){
-    e   <- i * 0.001 * E_crit
-    p   <- get_p(psi_soil, e, K, d, c, h)
-    g   <- e/1.6/(par_env$vpd/par_env$patm)
-    c_a <- calc_assimilation_limiting(vcmax, jmax, g, par_photosynth,v25, par_env)
-    # c_a <- get_a_ci(v25,j25,par_photosynth$gammastar,g,par_photosynth$ca,par_env$tc,par_photosynth$Iabs)
-    # k <- K*exp(-(p/d)^c)
+  if(psi_soil <= p_crit){
+    psi_soil = p_crit * 0.98
+    low_swp  = TRUE
+    print("WARNING: soil water potential is lower than critical plant water potential.")
+  } #(adjust values if psi soil is less than psi critical)
+  
+  # 3. Calculate E critical to set the loop max
+  E_crit = get_e_crit(psi_soil, K, d, c, h, dens_water) #mol m-2 (ground) s-1
+  de     = 0.00001
+  
+  # 4. Calculate a for each e step
+  list_e = vector("list", 200)
+  list_k = vector("list", 200)
+  list_a = vector("list", 200)
+  list_p = vector("list", 200)
+  list_g = vector("list", 200)
+  list_ci = vector("list", 200)
+  for(i in 1:200){
+    e   <- i * 0.005 * E_crit
+    p   <- get_p(psi_soil, e, K, d, c, h, dens_water)
+    g   <- e/(1.6*(par_env$vpd/par_env$patm)) #mol m-2 (ground) s-1
+    c_a <- calc_assimilation_limiting(vcmax, jmax, g, par_photosynth)
     e_de = e + de
-    p_de = get_p(psi_soil, e_de, K, d, c, h)
+    p_de = get_p(psi_soil, e_de, K, d, c, h, dens_water)
     k = de / (abs(p_de)-abs(p))
     list_e[[i]] <- e
     list_k[[i]] <- k
     list_a[[i]] <- c_a$a
     list_ci[[i]] <- c_a$ci
-    # list_a[[i]] <- c_a[[2]]
-    # list_ci[[i]] <- c_a[[1]]
     list_p[[i]] <- p
+    list_g[[i]] <- g
   }
-# 3. extend the lists
+  
+  # 5. Calculate Maxim Profit
   gain = unlist(list_a)/max(unlist(list_a))
   risk = 1.0 - unlist(list_k)/max(unlist(list_k))
   prof = gain - risk
   opt_site = which(prof == max(prof))
   opt_a = list_a[[opt_site]]
   opt_e = list_e[[opt_site]]
+  opt_g = list_g[[opt_site]]
   opt_p = list_p[[opt_site]]
-  return(tibble(a = opt_a, E = opt_e, p_leaf =  opt_p, low_swp = low_swp ))
+  
+  # 6. return optimized values
+  return(tibble(a = opt_a, E = opt_e, p_leaf =  opt_p, gs =  opt_g, e_crit = E_crit, K = K, low_swp = low_swp ))
 }
 
 
@@ -333,17 +347,25 @@ get_optima_sperry <- function(jmax = jmax, vcmax = vcmax, j25 = j25, v25 = v25, 
 ## WANG
 ###########################################
 get_optima_wang<- function(jmax = jmax, vcmax = vcmax, j25 = j25, v25 = v25, psi_soil, par_photosynth, par_plant, par_env){
-  LAI = par_env$LAI
-  K = par_plant$conductivity*LAI*1e-3 #mol m-2 (ground) s-1
-  d = par_plant$d
-  c = par_plant$c
-  h = par_plant$height
-  p_crit = d * log(1000.0) ^ (1.0/c)
+  # 1. calculate the p_crit @ layer_f = 1E-6
+  LAI        = par_env$LAI
+  K          = scale_conductivity_ks(par_plant$conductivity, par_env, par_plant, do_backtransform = TRUE)*LAI #mol m-2 (ground) s-1 MPa-1
+  d          = par_plant$d
+  c          = par_plant$c
+  h          = par_plant$height
+  dens_water = par_env$density_water
+  p_crit     = d * log(1000.0) ^ (1.0/c)
+
+  # 2. if soil psi is lower than p_crit, set soil psi to 98% p_crit 
   low_swp <- FALSE
-  if(psi_soil<=p_crit){psi_soil <- p_crit*0.98
-  low_swp <- TRUE
-  print("WARNING: soil water potential is lower than critical plant water potential.")} #(adjust values if psi soil is less than psi critical)
-  e_crit = get_e_crit(psi_soil, K, d, c, h) #mol m-2 (ground) s-1
+  if(psi_soil <= p_crit){
+    psi_soil = p_crit * 0.98
+    low_swp  = TRUE
+    print("WARNING: soil water potential is lower than critical plant water potential.")
+  }
+  
+  # 3. Optimizer
+  e_crit = get_e_crit(psi_soil, K, d, c, h, dens_water) #mol m-2 (ground) s-1
   e_min  = 0.0
   e_max  = e_crit
   e_opt  = 0.0
@@ -351,21 +373,18 @@ get_optima_wang<- function(jmax = jmax, vcmax = vcmax, j25 = j25, v25 = v25, psi
   de     = 0.0001
   continue <- TRUE
   while(continue){
-    e   = 0.5 * (e_min+e_max)
-    g   <- e/1.6/(par_env$vpd/par_env$patm)
-    c_a <- calc_assimilation_limiting(vcmax, jmax, g, par_photosynth,v25, par_env)
-    # c_a <- get_a_ci(v25,j25,par_photosynth$gammastar,g,par_photosynth$ca,par_env$tc,par_photosynth$Iabs)
-    e_de = e + de
-    g_de   <- e_de/1.6/(par_env$vpd/par_env$patm)
-    c_a_de <- calc_assimilation_limiting(vcmax, jmax, g_de, par_photosynth,v25, par_env)
-    # c_a_de <- get_a_ci(v25,j25,par_photosynth$gammastar,g_de,par_photosynth$ca,par_env$tc,par_photosynth$Iabs)
+    e         = 0.5 * (e_min+e_max)
+    g         = e/(1.6*(par_env$vpd/par_env$patm)) #mol m-2 (ground) s-1
+    c_a       <- calc_assimilation_limiting(vcmax, jmax, g, par_photosynth)
+    e_de      = e + de
+    g_de      = e_de/(1.6*(par_env$vpd/par_env$patm)) #mol m-2 (ground) s-1
+    c_a_de    <- calc_assimilation_limiting(vcmax, jmax, g_de, par_photosynth)
     optimizer = c_a_de$a * (e_crit-e_de) - c_a$a * (e_crit-e)
-    # optimizer = c_a_de[[2]] * (e_crit-e_de) - c_a[[2]] * (e_crit-e)
     if ((e_max-e_min)<0.0000001){
       e_opt = e
       a_opt = c_a$a
-      # a_opt = c_a[[2]]
-      p_opt = get_p(psi_soil, e, K, d, c, h)
+      p_opt = get_p(psi_soil, e, K, d, c, h, dens_water)
+      g_opt =  g
       continue <- FALSE
       }
     if (optimizer>0){
@@ -374,7 +393,8 @@ get_optima_wang<- function(jmax = jmax, vcmax = vcmax, j25 = j25, v25 = v25, psi
         e_max = e
       }
   }
-  return(tibble(a = a_opt, E = e_opt, p_leaf =  p_opt, low_swp = low_swp))
+  # 4. return optimized values
+  return(tibble(a = a_opt, E = e_opt, p_leaf =  p_opt, gs = g_opt, e_crit = e_crit, low_swp = low_swp))
 }
 
 
@@ -382,42 +402,47 @@ get_optima_wang<- function(jmax = jmax, vcmax = vcmax, j25 = j25, v25 = v25, psi
 ## WOLF-ANDEREGG-PACALA
 ###########################################
 get_optima_wap <- function(jmax = jmax, vcmax = vcmax, j25 = j25, v25 = v25, psi_soil, par_photosynth, par_plant, par_env, aa=0.1, bb=0.1){
-  LAI = par_env$LAI
-  K = par_plant$conductivity*LAI*1e-3 #mol m-2 (ground) s-1
-  d = par_plant$d
-  c = par_plant$c
-  h = par_plant$height
-  p_crit = d * log(1000.0) ^ (1.0/c)
+  # 1. calculate the p_crit @ layer_f = 1E-6
+  LAI        = par_env$LAI
+  K          = scale_conductivity_ks(par_plant$conductivity, par_env, par_plant, do_backtransform = TRUE)*LAI #mol m-2 (ground) s-1 MPa-1
+  d          = par_plant$d
+  c          = par_plant$c
+  h          = par_plant$height
+  dens_water = par_env$density_water
+  p_crit     = d * log(1000.0) ^ (1.0/c)
+  
+  # 2. if soil psi is lower than p_crit, set soil psi to 98% p_crit 
   low_swp <- FALSE
-  if(psi_soil<=p_crit){psi_soil <- p_crit*0.98
-  low_swp <- TRUE
-  print("WARNING: soil water potential is lower than critical plant water potential.")} #(adjust values if psi soil is less than psi critical)
-  e_crit = get_e_crit(psi_soil, K, d, c, h) #mol m-2 (ground) s-1
+  if(psi_soil <= p_crit){
+    psi_soil = p_crit * 0.98
+    low_swp  = TRUE
+    print("WARNING: soil water potential is lower than critical plant water potential.")
+  }
+  
+  # 3. Optimizer
+  e_crit = get_e_crit(psi_soil, K, d, c, h, dens_water) #mol m-2 (ground) s-1
   e_min  = 0.0
   e_max  = e_crit
   e_opt  = 0.0
   a_opt  = 0.0
   de     = 0.0001
-  continue <- TRUE
+  continue = TRUE
   while(continue){
-    e   = 0.5 * (e_min+e_max)
-    p = get_p(psi_soil, e, K, d, c, h)
-    g   <- e/1.6/(par_env$vpd/par_env$patm)
-    c_a <- calc_assimilation_limiting(vcmax, jmax, g, par_photosynth,v25, par_env)
-    # c_a <- get_a_ci(v25,j25,par_photosynth$gammastar,g,par_photosynth$ca,par_env$tc,par_photosynth$Iabs)
-    e_de = e + de
-    p_de = get_p(psi_soil, e_de, K, d, c, h)
-    g_de   <- e_de/1.6/(par_env$vpd/par_env$patm)
-    c_a_de <- calc_assimilation_limiting(vcmax, jmax, g_de, par_photosynth,v25, par_env)
-    # c_a_de <- get_a_ci(v25,j25,par_photosynth$gammastar,g_de,par_photosynth$ca,par_env$tc,par_photosynth$Iabs)
-    optimizer = c_a_de$a - aa*p_de**2.0 - bb*p_de - c_a$a + aa*p**2.0 + bb*p
-    # optimizer = c_a_de[[2]] - aa*p_de**2.0 - bb*p_de - c_a[[2]] + aa*p**2.0 + bb*p
+    e          = 0.5 * (e_min+e_max)
+    p          = get_p(psi_soil, e, K, d, c, h, dens_water)
+    g          = e/(1.6*(par_env$vpd/par_env$patm)) #mol m-2 (ground) s-1
+    c_a        <- calc_assimilation_limiting(vcmax, jmax, g, par_photosynth)
+    e_de       = e + de
+    p_de       = get_p(psi_soil, e_de, K, d, c, h, dens_water)
+    g_de       = e_de/(1.6*(par_env$vpd/par_env$patm)) #mol m-2 (ground) s-1
+    c_a_de     <- calc_assimilation_limiting(vcmax, jmax, g_de, par_photosynth)
+    optimizer  = c_a_de$a - aa*p_de**2.0 - bb*p_de - c_a$a + aa*p**2.0 + bb*p
     if ((e_max-e_min)<0.000001){
-      e_opt = e
-      a_opt = c_a$a
-      # a_opt = c_a[[2]]
-      p_opt = get_p(psi_soil, e, K, d, c, h)
-      continue <- FALSE
+      e_opt    = e
+      a_opt    = c_a$a
+      p_opt    = get_p(psi_soil, e, K, d, c, h, dens_water)
+      g_opt    =  g
+      continue = FALSE
     }
     if (optimizer>0){
       e_min = e
@@ -425,31 +450,70 @@ get_optima_wap <- function(jmax = jmax, vcmax = vcmax, j25 = j25, v25 = v25, psi
       e_max = e
     }
   }
-  return(tibble(a = a_opt, E = e_opt, p_leaf =  p_opt, low_swp = low_swp))
+  
+  # 4. return optimized values
+  return(tibble(a = a_opt, E = e_opt, p_leaf =  p_opt, gs = g_opt, e_crit = e_crit, low_swp = low_swp))
 }
+
 
 ###########################################
 ## PHYDRO
 ###########################################
-optimise_stomata_phydro <- function(fn_profit, v25, psi_soil, par_photosynth, par_plant, par_env, par_cost = par_cost, return_all = FALSE){
+fn_profit <- function(par, psi_soil, par_cost, par_photosynth, par_plant, par_env, do_optim = FALSE, opt_hypothesis){
+  
+  jmax = exp(par[1])  # Jmax in umol/m2/s (logjmax is supplied by the optimizer)
+  dpsi = par[2]       # delta Psi in MPa
+  
+  gs = calc_gs(dpsi, psi_soil, par_plant, par_env) * par_env$LAI  # gs in mol/m2ground/s
+  E  = 1.6*gs*(par_env$vpd/par_env$patm)*1e6         # E in umol/m2/s
+  
+  ## light-limited assimilation
+  a_j   <- calc_assim_light_limited(gs, jmax, par_photosynth) # Aj in umol/m2ground/s
+  a     = a_j$a
+  ci    = a_j$ci
+  vcmax = calc_vcmax_coordinated_numerical(a,ci, par_photosynth)
+  
+  costs = par_cost$alpha * jmax + par_cost$gamma * dpsi^2 #((abs((-dpsi)/par_plant$psi50)))^2  
+  
+  benefit = 1 #(1+1/(par_photosynth$ca/40.53))/2
+  
+  dummy_costs = 0*exp(20*(-abs(dpsi/4)-abs(jmax/1))) # ONLY added near (0,0) for numerical stability. 
+  
+  if (opt_hypothesis == "PM"){
+    ## Profit Maximisation
+    out <- a*benefit - costs - dummy_costs
+  } else if (opt_hypothesis == "LC"){
+    ## Least Cost
+    out <- -(costs+dummy_costs) / (a+1e-4)
+  }
+  
+  if (do_optim){
+    return(-out)
+  } else {
+    return(out)
+  }
+}
+
+optimise_stomata_phydro <- function(fn_profit, psi_soil, par_cost, par_photosynth, par_plant, par_env, return_all = FALSE, opt_hypothesis){
   
   out_optim <- optimr::optimr(
-    par       = c(logjmax=0, dpsi=1),  
-    lower     = c(-10, .0001),
-    upper     = c(10, 20),
-    fn        = fn_profit,
-    psi_soil  = psi_soil,
-    v25 = v25,
+    par            = c(logjmax=0, dpsi=1),  
+    lower          = c(-10, .0001),
+    upper          = c(10, 1e6),
+    fn             = fn_profit,
+    psi_soil       = psi_soil,
+    par_cost       = par_cost,
     par_photosynth = par_photosynth,
-    par_cost = par_cost,
-    par_plant = par_plant,
-    par_env   = par_env,
-    method    = "L-BFGS-B",
-    control   = list( maxit = 5000, maximize = TRUE, fnscale=1e1 )
+    par_plant      = par_plant,
+    par_env        = par_env,
+    do_optim       = TRUE,
+    opt_hypothesis = opt_hypothesis,
+    method         = "L-BFGS-B",
+    control        = list(maxit = 500, maximize = TRUE, fnscale = 1e4)
   )
   
   out_optim$value <- -out_optim$value
-
+  
   if (return_all){
     out_optim
   } else {
@@ -458,135 +522,139 @@ optimise_stomata_phydro <- function(fn_profit, v25, psi_soil, par_photosynth, pa
 }
 
 
-phydro_optim = function(par, jmax=jmax, vcmax=vcmax, v25 = v25, psi_soil, par_cost, par_photosynth, par_plant, par_env){
-  jmax = exp(par[1])  # Jmax in umol/m2/s (logjmax is supplied by the optimizer)
-  dpsi = par[2]       # delta Psi in MPa
-  # print(paste("jmax: ", as.character(jmax), ", dpsi: ", as.character(dpsi)))
-  LAI = par_env$LAI
-  gs = calc_gs(dpsi, psi_soil, par_plant, par_env)*LAI  # gs in mol m-2 (ground) s-1 Mpa
-  
-  if(gs <= 0){return(-9999999)}else{
-  ## light-limited assimilation
-  a_j <- calc_assim_light_limited(gs, jmax, par_photosynth,v25,par_env) # Aj in umol m-2 (ground) s-1
-  a = a_j$a
-  ci = a_j$ci
-  vcmax = calc_vcmax_coordinated_numerical(a, ci, par_photosynth, v25, par_env)
-  costs = par_cost$alpha * jmax + par_cost$gamma * dpsi^2 #((abs((-dpsi)/par_plant$psi50)))^2  
-  a = calc_assimilation_limiting(vcmax, jmax, gs, par_photosynth, v25, par_env)$a
-  out <- costs - a
-  
-  return(out)
-  }
-}
-
-
-
 ###########################################
 ## MODEL OPTIMIZATION AND DATA PREPARATION
 ###########################################
 model_numerical <- function(tc, ppfd, vpd, nR, co2, elv, LAI, fapar, kphio, psi_soil, par_plant, stomatal_model = "sperry"){
   
-  p = rpmodel::calc_patm(elv)
+  patm = rpmodel::calc_patm(elv)
   par_photosynth <- list(
-    kmm = rpmodel::calc_kmm(tc, p),
-    gammastar = rpmodel::calc_gammastar(tc, p),
-    phi0 = kphio*rpmodel::calc_ftemp_kphio(tc),
-    Iabs = ppfd*fapar,
-    ca = co2*p*1e-6,  # Convert to partial pressure
-    patm = p,
-    delta = 0
+    kmm       = rpmodel::calc_kmm(tc, patm),
+    gammastar = rpmodel::calc_gammastar(tc, patm),
+    phi0      = kphio * rpmodel::calc_ftemp_kphio(tc),
+    Iabs      = ppfd * fapar,
+    ca        = co2 * patm * 1e-6,  # Convert to partial pressure
+    patm      = patm,
+    delta     = 0
+    # delta     = ftemp_inst_rd( tc )
   )
   par_env = list(
-    viscosity_water = rpmodel::calc_viscosity_h2o(tc, p),  # Needs to be imported from rpmodel.R
-    density_water = rpmodel::calc_density_h2o(tc, p),  # Needs to be imported from rpmodel.R
-    patm = p,
-    tc = tc,
-    vpd = vpd,
-    nR = nR,
-    LAI = LAI
+    viscosity_water = rpmodel::calc_viscosity_h2o(tc, patm),  # Needs to be imported from rpmodel.R
+    density_water   = rpmodel::calc_density_h2o(tc, patm),  # Needs to be imported from rpmodel.R
+    patm            = patm,
+    tc              = tc,
+    vpd             = vpd,
+    nR              = nR,
+    LAI             = LAI
   )
   
   #vcmax and jmax calculation (Arhenius)
-  j25 = par_plant$j25
-  v25 = par_plant$v25
-  tem = par_env$tc
-  jmax_ar = GetPhotosyntheticJmax(j25,tem)
-  vcmax_ar = GetPhotosyntheticVcmax(v25,tem)
+  j25      = par_plant$j25
+  v25      = par_plant$v25
+  tem      = par_env$tc
+  jmax_ar  = GetPhotosyntheticJmax(j25, tem)
+  vcmax_ar = GetPhotosyntheticVcmax(v25, tem)
+  par_plant$conductivity = par_plant$conductivity * 0.2
+  # par_plant$psi50 = par_plant$psi50 / 3
+  # par_plant$d = par_plant$d / 3
+  # par_plant$c = 1
+  # par_plant$b = 1
   
+  #Sperry
   if(stomatal_model == "sperry"){
-    dps = get_optima_sperry(jmax = jmax_ar, vcmax = vcmax_ar, j25 = j25, v25 = v25, psi_soil, par_photosynth, par_plant, par_env)
+    dps <- get_optima_sperry(jmax = jmax_ar, vcmax = vcmax_ar, j25 = j25, v25 = v25, psi_soil, par_photosynth, par_plant, par_env)
     return(list(
-      p_leaf=dps$p_leaf,
-      jmax=jmax_ar,
-      vcmax=vcmax_ar,
-      E=dps$E,
-      a=dps$a,
+      p_leaf  = dps$p_leaf,
+      jmax    = jmax_ar,
+      vcmax   = vcmax_ar,
+      E       = dps$E,
+      a       = dps$a,
+      gs      = dps$gs,
+      e_crit  = dps$e_crit,
+      K       = dps$K,
       low_swp = dps$low_swp
     ))
   }
   
+  #Wang
   if(stomatal_model == "wang"){
-    dps = get_optima_wang(jmax = jmax_ar, vcmax = vcmax_ar, j25 = j25, v25 = v25, psi_soil, par_photosynth, par_plant, par_env)
+    dps <- get_optima_wang(jmax = jmax_ar, vcmax = vcmax_ar, j25 = j25, v25 = v25, psi_soil, par_photosynth, par_plant, par_env)
     return(list(
-      p_leaf=dps$p_leaf,
-      jmax=jmax_ar,
-      vcmax=vcmax_ar,
-      E=dps$E,
-      a=dps$a,
+      p_leaf  = dps$p_leaf,
+      jmax    = jmax_ar,
+      vcmax   = vcmax_ar,
+      E       = dps$E,
+      a       = dps$a,
+      gs      = dps$gs,
+      e_crit  = dps$e_crit,
       low_swp = dps$low_swp
     ))
   }
   
+  #Wap
   if(stomatal_model == "wap"){
-    dps = get_optima_wap(jmax = jmax_ar, vcmax = vcmax_ar, j25 = j25, v25 = v25, psi_soil, par_photosynth, par_plant, par_env, aa=0.1, bb=0.1)
+    dps <- get_optima_wap(jmax = jmax_ar, vcmax = vcmax_ar, j25 = j25, v25 = v25, psi_soil, par_photosynth, par_plant, par_env, aa=0.1, bb=0.1)
     return(list(
-      p_leaf=dps$p_leaf,
-      jmax=jmax_ar,
-      vcmax=vcmax_ar,
-      E=dps$E,
-      a=dps$a,
+      p_leaf  = dps$p_leaf,
+      jmax    = jmax_ar,
+      vcmax   = vcmax_ar,
+      E       = dps$E,
+      a       = dps$a,
+      gs      = dps$gs,
+      e_crit  = dps$e_crit,
       low_swp = dps$low_swp
     ))
   }
   
+  #Phydro
   if(stomatal_model == "phydro"){
     par_cost = list(
       alpha = 0.1,       # cost of Jmax
       gamma = 1          # cost of hydraulic repair
     )
     p_crit = par_plant$d * log(1000.0) ^ (1.0/par_plant$c)
+    # 2. if soil psi is lower than p_crit, set soil psi to 98% p_crit 
     low_swp <- FALSE
-    if(psi_soil<=p_crit){
-      psi_soil <- p_crit*0.98
-      low_swp <- TRUE
+    if(psi_soil <= p_crit){
+      psi_soil = p_crit*0.98
+      low_swp  = TRUE
       print("WARNING: soil water potential is lower than critical plant water potential.")
-      } #(adjust values if psi soil is less than psi critical)
-    lj_dps = optimise_stomata_phydro(phydro_optim,
-                                     v25 = v25,
-                                     psi_soil = psi_soil,
-                                     par_photosynth = par_photosynth,
-                                     par_plant = par_plant,
-                                     par_env = par_env,
-                                     par_cost = par_cost)
-    jmax = exp(lj_dps[1])
-    dpsi = lj_dps[2]
-    gs = calc_gs(dpsi, psi_soil, par_plant, par_env)*par_env$LAI  # gs in mol m-2 (ground) s-1 Mpa-1
-    E = 1.6*gs*(par_env$vpd/par_env$patm)         # E in mol m-2 (ground) s-1
-    a_j = calc_assim_light_limited(gs = gs, jmax = jmax, par_photosynth = par_photosynth, v25=v25, par_env = par_env)
-    a = a_j$a
-    ci = a_j$ci
-    vcmax = calc_vcmax_coordinated_numerical(a, ci, par_photosynth, v25=v25, par_env = par_env)
+    }
+    # 3. Optimizer
+    lj_dps = optimise_stomata_phydro(fn_profit, 
+                                    psi_soil = psi_soil, 
+                                    par_cost  = par_cost, 
+                                    par_photosynth = par_photosynth, 
+                                    par_plant = par_plant, 
+                                    par_env = par_env, 
+                                    opt_hypothesis = "PM")
+    
+    profit = fn_profit(par = lj_dps, psi_soil = psi_soil, par_cost  = par_cost, par_photosynth = par_photosynth, par_plant = par_plant, par_env = par_env, opt_hypothesis = "PM")
+    
+    jmax  = exp(lj_dps[1]) %>% unname()
+    dpsi  = lj_dps[2] %>% unname()
+    gs    = calc_gs(dpsi, psi_soil, par_plant, par_env) * par_env$LAI # gs in mol m-2 (ground) s-1
+    a_j   = calc_assim_light_limited(gs = gs, jmax = jmax, par_photosynth = par_photosynth)
+    a     = a_j$a
+    ci    = a_j$ci
+    vcmax = calc_vcmax_coordinated_numerical(a, ci, par_photosynth)
+    E     = 1.6 * gs * par_env$vpd/patm  # E in mol m-2 (ground) s-1
+    gs    = gs/patm*1e6 #transform to umol m-2(ground) s-1 Pa-1
+    psi_l = psi_soil - dpsi
+
     return(list(
-      jmax=jmax,
-      dpsi=dpsi,
-      gs=gs,
-      E=E,
-      a=a,
-      ci=ci,
-      chi = ci/par_photosynth$ca,
-      vcmax=vcmax,
+      jmax         = jmax,
+      profit       = profit,
+      dpsi         = dpsi,
+      p_leaf       = psi_l,
+      gs           = gs,
+      E            = E,
+      a            = a,
+      ci           = ci,
+      chi          = ci/par_photosynth$ca,
+      vcmax        = vcmax,
       chi_jmax_lim = 0,
-      low_swp = low_swp
+      low_swp      = low_swp
     ))
   }
   

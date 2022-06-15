@@ -13,11 +13,9 @@ rpmodel_ecrit <- function(
                                  0.081785),
                           0.049977)),
     beta = ifelse(c4, 146/9, 146),
+    b_cost = 250,
     psi_soil = psi_soil, 
-    K = K, 
-    d = d, 
-    c = c, 
-    h = h, 
+    par_plant = par_plant,
     rs = rs, 
     LAI = LAI,
     soilm = stopifnot(!do_soilmstress),
@@ -95,9 +93,12 @@ rpmodel_ecrit <- function(
   kmm <- calc_kmm( tc, patm )
   
   ## viscosity correction factor = viscosity( temp, press )/viscosity( 25 degC, 1013.25 Pa)
-  # ns      <- viscosity_h2o( tc, patm )  # Pa sc4, 1.0,
-  # ns25    <- viscosity_h2o( kTo, kPo )  # Pa s
-  # ns_star <- ns / ns25  # (unitless)
+  ns      <- viscosity_h2o( tc, patm )  # Pa sc4, 1.0,
+  ns25    <- viscosity_h2o( kTo, kPo )  # Pa s
+  ns_star <- ns / ns25  # (unitless)
+  d <- par_plant$d
+  c <- par_plant$c
+  h <- par_plant$height
   p_crit  <- d * log(1000.0) ^ (1.0/c)
   low_swp <- FALSE
   if(psi_soil<=p_crit){
@@ -105,15 +106,35 @@ rpmodel_ecrit <- function(
     low_swp  <- TRUE
     print("WARNING: soil water potential is lower than critical plant water potential.")
   }
-  K      <- K * 1e-3 * LAI #mol m-2 (ground) s-1
-  ecrit  <- get_e_crit(psi_soil, K, d, c, h) #mol m-2 (ground) s-1
-  resp   <- rs * rpmodel::calc_ftemp_inst_rd(tc)
-  a_cost <- resp/ecrit
   
+  par_env = list(
+    viscosity_water = rpmodel::calc_viscosity_h2o(tc, patm),  # Needs to be imported from rpmodel.R
+    density_water   = rpmodel::calc_density_h2o(tc, patm),  # Needs to be imported from rpmodel.R
+    patm            = patm,
+    tc              = tc,
+    vpd             = vpd,
+    LAI             = LAI
+  )
+  
+
+  K <- scale_conductivity_ks(par_plant$conductivity, par_env, par_plant, do_backtransform = TRUE)*LAI #mol m-2 (ground) s-1 MPa-1
+  e_crit  <- get_e_crit(psi_soil, K, d, c, h, par_env$density_water) #mol m-2 (ground) s-1
+  e_crit_max <- get_e_crit(0, K, d, c, h, par_env$density_water) #mol m-2 (ground) s-1
+  resp   <- rs * rpmodel::calc_ftemp_inst_rd(tc)
+  a_cost <- ns_star+4*(ns_star *2*(e_crit_max - e_crit)/(2*e_crit_max - e_crit))
+  # a_cost <- 0.02/146/ns_star *2*(e_crit_max - e_crit)/(resp)/((e_crit_max/(resp))+((e_crit_max - e_crit)/(resp)))
+  # beta <- 0.02/(a_cost*ns_star)
+  # a_cost <- resp/e_crit
+  # beta <- 0.03
+  
+  #---- Quantities that scale linearly with absorbed light ---------------------
+  iabs <- fapar * ppfd
   
   ##----Optimal ci -------------------------------------------------------------
   ## The heart of the P-model: calculate ci:ca ratio (chi) and additional terms
   out_optchi <- optimal_chi( kmm, gammastar, a_cost, ca, vpd, beta, c4 )
+  
+  # out_optchi <- optimal_chi_ecrit(kmm, gammastar, kphio, iabs, resp, e_crit, b_cost, ca, vpd, beta, c4)
   
   ## leaf-internal CO2 partial pressure (Pa)
   ci <- out_optchi$chi * ca
@@ -175,9 +196,6 @@ rpmodel_ecrit <- function(
   ftemp_inst_rd <- ftemp_inst_rd( tc )
   rd_unitiabs  <- rd_to_vcmax * (ftemp_inst_rd / ftemp25_inst_vcmax) * out_lue_vcmax$vcmax_unitiabs
   
-  #---- Quantities that scale linearly with absorbed light ---------------------
-  iabs <- fapar * ppfd
-  
   # Gross Primary Productivity
   gpp <- iabs * out_lue_vcmax$lue   # in g C m-2 s-1
   
@@ -233,6 +251,11 @@ rpmodel_ecrit <- function(
   ## average stomatal conductance
   gs <- assim / (ca - ci)
   
+  #calc a_cost
+  e <- 1.6*gs*vpd
+  p_leaf <- get_p(psi_soil,e,K,d,c,h,par_env$density_water)
+  # a_cost <- resp/(e_crit-e)
+  
   ## construct list for output
   out <- list(
     gpp             = gpp,   # remove this again later
@@ -247,6 +270,8 @@ rpmodel_ecrit <- function(
     ci              = ci,
     iwue            = iwue,
     gs              = gs,
+    e_crit          = e_crit,
+    p_leaf          = p_leaf,
     vcmax           = vcmax,
     vcmax25         = vcmax25,
     jmax            = jmax,
@@ -260,36 +285,6 @@ rpmodel_ecrit <- function(
 }
 
 
-Skip to content
-Pull requests
-Issues
-Marketplace
-Explore
-@vflo
-computationales /
-  rpmodel
-Public
-
-Code
-Issues 11
-Pull requests 3
-Actions
-Projects
-Wiki
-Security
-
-Insights
-
-rpmodel/R/subroutines.R
-@khufkens
-khufkens updating docs, resolving build error
-Latest commit 6f823f9 on 3 Mar
-History
-3 contributors
-@stineb
-@khufkens
-@davidorme
-1050 lines (894 sloc) 34.6 KB
 #' Dampen inputs of rpmodel
 #'
 #' Applies an exponential dampening input time series with specified time scale.
@@ -1132,6 +1127,7 @@ optimal_chi <- function(kmm, gammastar, ns_star, ca, vpd, beta, c4){
   return(out)
 }
 
+
 # ## wrap if condition in a function to allow vectorization
 # mj <- function(ns_star, vpd, vacg, vbkg, vdcg, gammastar){
 #
@@ -1339,153 +1335,3 @@ QUADM <- function(A,B,C){
   }
   
 }
-
-# 
-# calc_optimal_chi_ecrit <- function (kmm, gammastar, a_cost, ca, vpd, beta){
-#   vpd <- ifelse(vpd < 0, 0, vpd)
-#   xi <- sqrt((beta * (kmm + gammastar))/(1.6 * a_cost))
-#   chi <- gammastar/ca + (1 - gammastar/ca) * xi/(xi + sqrt(vpd))
-#   vdcg <- ca - gammastar
-#   vacg <- ca + 2 * gammastar
-#   vbkg <- beta * (kmm + gammastar)
-#   calc_mj <- function(a_cost, vpd, vbkg) {
-#     vsr <- sqrt(1.6 * a_cost * vpd/vbkg)
-#     mj <- vdcg/(vacg + 3 * gammastar * vsr)
-#     return(mj)
-#   }
-#   mj <- ifelse(a_cost > 0 & vpd > 0 & vbkg > 0, calc_mj(a_cost,vpd, vbkg), rep(NA, length(vpd)))
-#   gamma <- gammastar/ca
-#   kappa <- kmm/ca
-#   mc <- (chi - gamma)/(chi + kappa)
-#   mjoc <- (chi + kappa)/(chi + 2 * gamma)
-#   out <- list(chi = chi, mc = mc, mj = mj, mjoc = mjoc)
-#   return(out)
-# }
-# 
-# calc_optim_num_ecrit <- function (kmm, gammastar, ecrit, ca, vpd, resp, ppfd, fapar, kphio, beta, b_cost, c_cost, vcmax_start, gs_start, jmax_start){
-#   
-#   optimise_this_gs_vcmax_jmax <- function(par, args, iabs, kphio, beta, b_cost, c_cost, maximize = FALSE, return_all = FALSE) {
-#     kmm <- args[1]
-#     gammastar <- args[2]
-#     ecrit <- args[3]
-#     ca <- args[4]
-#     vpd <- args[5]
-#     resp <- args[6]
-#     vcmax <- par[1]
-#     gs <- par[2]
-#     jmax <- par[3]
-#     L <- 1/sqrt(1 + ((4 * kphio * iabs)/jmax)^2)
-#     A <- -gs
-#     B <- gs * ca - 2 * gammastar * gs - L * kphio * iabs
-#     C <- 2 * gammastar * gs * ca + L * kphio * iabs * gammastar
-#     ci_j <- QUADM(A, B, C)
-#     a_j <- kphio * iabs * (ci_j - gammastar)/(ci_j + 2 * gammastar) * L
-#     A <- -1 * gs
-#     B <- gs * ca - gs * kmm - vcmax
-#     C <- gs * ca * kmm + vcmax * gammastar
-#     ci_c <- QUADM(A, B, C)
-#     a_c <- vcmax * (ci_c - gammastar)/(ci_c + kmm)
-#     assim <- min(a_j, a_c)
-#     ci <- max(ci_c, ci_j)
-#     eactual <- gs * vpd * 1.6
-#     a_cost <- resp/ecrit
-#     cost_transp <- 1.6 * a_cost * gs * vpd
-#     cost_vcmax <- b_cost * vcmax
-#     cost_jmax <- c_cost * jmax
-#     if (assim <= 0) {
-#       net_assim <- (999999999.9)
-#     }
-#     else if(a_cost <= 0) {
-#       net_assim <- (999999999.9)
-#     }
-#     else {
-#       net_assim <- (cost_transp + cost_vcmax + cost_jmax)/assim
-#     }
-#     if (maximize) 
-#       net_assim <- -net_assim
-#     if (return_all) {
-#       return(list(vcmax = vcmax, jmax = jmax, gs = gs, 
-#                   ci = ci, chi = ci/ca, a_c = a_c, a_j = a_j, 
-#                   assim = assim, ci_c = ci_c, ci_j = ci_j, cost_transp = cost_transp, 
-#                   cost_vcmax = cost_vcmax, cost_jmax = cost_jmax, 
-#                   net_assim = net_assim))
-#     }
-#     else {
-#       return(net_assim)
-#     }
-#   }
-#   
-#   out_optim <- optimr::optimr(par = c(vcmax_start, gs_start, jmax_start), 
-#                               lower = c(vcmax_start * 0.001, gs_start * 0.001, jmax_start * 0.001), 
-#                               upper = c(vcmax_start * 1000, gs_start * 1000, jmax_start * 1000), 
-#                               fn = optimise_this_gs_vcmax_jmax, 
-#                               args = c(kmm, gammastar, ecrit, ca, vpd, resp), 
-#                               iabs = (ppfd * fapar), 
-#                               kphio = kphio, 
-#                               beta = beta, 
-#                               b_cost = b_cost,
-#                               c_cost = c_cost/4, 
-#                               method = "L-BFGS-B", 
-#                               maximize = FALSE,
-#                               control = list(maxit = 1e+05))
-#   
-#   varlist <- optimise_this_gs_vcmax_jmax(par = out_optim$par, 
-#                                          args = c(kmm, gammastar, ecrit, ca, vpd, resp), 
-#                                          iabs = (fapar * ppfd), 
-#                                          kphio, beta,b_cost, c_cost/4, 
-#                                          maximize = FALSE, 
-#                                          return_all = TRUE)
-#   return(varlist)
-# }
-# 
-# 
-# 
-# co2_to_ca <- function( co2, patm ){
-#   #-----------------------------------------------------------------------
-#   # Input:    - float, annual atm. CO2, ppm (co2)
-#   #           - float, monthly atm. pressure, Pa (patm)
-#   # Output:   - ca in units of Pa
-#   # Features: Converts ca (ambient CO2) from ppm to Pa.
-#   #-----------------------------------------------------------------------
-#   ca   <- ( 1.0e-6 ) * co2 * patm         # Pa, atms. CO2
-#   return( ca )
-# }
-# 
-# 
-# calc_lue_vcmax_wang17 <- function(out_optchi, kphio, ftemp_kphio, c_molmass, soilmstress, c_cost){
-#   
-#   ## Include effect of Jmax limitation
-#   len <- length(out_optchi[[1]])
-#   mprime <- calc_mprime( out_optchi$mj, c_cost )
-#   
-#   out <- list(
-#     
-#     ## Light use efficiency (gpp per unit absorbed light)
-#     lue = kphio * ftemp_kphio * mprime * c_molmass * soilmstress,
-#     
-#     ## Vcmax normalised per unit absorbed PPFD (assuming iabs=1), with Jmax limitation
-#     vcmax_unitiabs = kphio * ftemp_kphio * out_optchi$mjoc * mprime / out_optchi$mj * soilmstress,
-#     
-#     ## complement for non-smith19 
-#     omega      = rep(NA, len),
-#     omega_star = rep(NA, len)
-#     
-#   )
-#   
-#   return(out)
-# }
-# 
-# 
-# calc_mprime <- function( mc, kc ){
-#   #-----------------------------------------------------------------------
-#   # Input:  mc   (unitless): factor determining LUE
-#   # Output: mpi (unitless): modiefied m accounting for the co-limitation
-#   #                         hypothesis after Prentice et al. (2014)
-#   #-----------------------------------------------------------------------
-#   mpi <- mc^2 - kc^(2.0/3.0) * (mc^(4.0/3.0))
-#   
-#   # Check for negatives:
-#   mpi <- ifelse(mpi>0, sqrt(mpi), NA)
-#   
-#   return(mpi)
-# }

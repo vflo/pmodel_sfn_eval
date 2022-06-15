@@ -7,17 +7,17 @@ do_phydro_params <- function(sp, sfn = sfn, visco = visco, density = density){
   c <- sp$c
   d <- sp$d
   psi <- seq(0,-9,-0.01)
-  cond_Ks <- sp$Ks
+  cond_Ks <- sp$Ks # Kg m-1 (sapwood) s-1 MPa-1
   if(is.na(cond_Ks)){cond_Ks <- NA}
   if(is.na(cond_Kl)){cond_Kl <- NA}
   if(is.na(c)){c <- NA}
   if(is.na(d)){d <- NA}
-  vulne_curve <- cond_Ks*exp(-(psi/d)^c)
+  vulne_curve <- exp(-(psi/d)^c)
   
   opt_curve_param <- function(par){
     p <- par[1]
     b <- par[2]
-    res <- (1/2)^((psi/p)^b)*cond_Ks
+    res <- (1/2)^((psi/p)^b)
     rmse <- sqrt(sum((vulne_curve-res)^2)/length(vulne_curve))
     return(rmse)
   }
@@ -30,7 +30,7 @@ do_phydro_params <- function(sp, sfn = sfn, visco = visco, density = density){
   sfn %>% 
     filter(pl_species == sp$pl_species) %>% 
     group_by(pl_code) %>%
-    dplyr::select(pl_code, pl_sapw_area, pl_leaf_area, height, st_lai, st_basal_area, sp_basal_area_perc) %>% 
+    dplyr::select(pl_code, pl_sapw_area, pl_dbh, pl_leaf_area, height, st_lai, st_basal_area, sp_basal_area_perc) %>% 
     summarise_all(unique,
                   .groups = "drop") %>% 
     dplyr::select(-pl_code) %>% 
@@ -38,9 +38,11 @@ do_phydro_params <- function(sp, sfn = sfn, visco = visco, density = density){
   
   par_plant_std = list(
     #Ks0=1e-12, # m2
+    dbh = plant_sp_data$pl_dbh*1e-2, #m
+    plant_ba = pi*(plant_sp_data$pl_dbh*1e-2/2)^2,#m2
+    pl_sapw_area =  plant_sp_data$pl_sapw_area*1e-4,#m2
     st_basal_area = plant_sp_data$st_basal_area,
     sp_basal_area = plant_sp_data$sp_basal_area_perc,
-    v_huber = plant_sp_data$pl_sapw_area/plant_sp_data$pl_leaf_area/10^4, # m2sapwood m-2leaf
     height = plant_sp_data$height, # m
     LAI = plant_sp_data$st_lai, # m2leaf m-2soil
     conductivity = cond_Ks, #Kg m-1 MPa-1 s-1
