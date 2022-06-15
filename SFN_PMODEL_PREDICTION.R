@@ -124,7 +124,7 @@ as.list(list_files) %>%
                       group = grp), fill = "grey" )+
       geom_line(aes(TIMESTAMP,Gs_sapflow,group = grp),color = "black")+
       geom_line(aes(TIMESTAMP,gs, color=model_type,group = interaction(grp,model_type)))+
-      geom_line(aes(TIMESTAMP,LAI,group = grp), color = "green")+
+      # geom_line(aes(TIMESTAMP,LAI,group = grp), color = "green")+
       # geom_ribbon(aes(x=TIMESTAMP, ymin = (E_sapflow -E_sapflow_sd), ymax = (E_sapflow + E_sapflow_sd),
       #                 group = grp), fill = "grey" )+
       # geom_line(aes(TIMESTAMP,E_sapflow,group = grp),color = "black")+
