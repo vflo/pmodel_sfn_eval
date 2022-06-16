@@ -50,14 +50,17 @@ include_fapar_lai <- function(sfn, fapar_noaa, fapar){
   min_data = min(fapar_filled$TIMESTAMP)
 
 # Build FAPAR model
-  model_fapar <- qgam(Fapar ~ s(TIMESTAMP, bs = 'tp', k = 180), data = fapar_filled %>%
+  k_ <- as.integer(nrow(fapar_filled)*0.1)
+  if(k_ >= 3){
+    
+    model_fapar <- qgam(Fapar ~ s(TIMESTAMP, bs = 'tp', k = k_), data = fapar_filled %>%
                         dplyr::select(TIMESTAMP,Fapar) %>%
                         mutate(TIMESTAMP = TIMESTAMP %>%
-                                 as.numeric()), qu = 0.5)
-  model_lai <- qgam(Lai ~ s(TIMESTAMP, bs = 'tp', k = 180), data = fapar_filled %>%
+                                 as.numeric()), qu = 0.6)
+    model_lai <- qgam(Lai ~ s(TIMESTAMP, bs = 'tp', k = k_), data = fapar_filled %>%
                       dplyr::select(TIMESTAMP,Lai) %>%
                       mutate(TIMESTAMP = TIMESTAMP %>%
-                               as.numeric()), qu = 0.5)
+                               as.numeric()), qu = 0.6)
   # x <- fapar_filled$TIMESTAMP %>% as.numeric()
   # y_fapar <- fapar_filled$Fapar
   # y_lai <- fapar_filled$Lai
@@ -72,24 +75,35 @@ include_fapar_lai <- function(sfn, fapar_noaa, fapar){
   #                              mutate(TIMESTAMP = as.numeric(lubridate::ymd(TIMESTAMP)))%>% 
   #                              unique() %>% 
   #                              pull())
-  pred_FAPAR <- predict(model_fapar, tibble(TIMESTAMP = sfn[,"TIMESTAMP"] %>%mutate(TIMESTAMP = as.numeric(lubridate::ymd(TIMESTAMP)))%>% unique() %>% pull()))
-  pred_LAI <- predict(model_lai, tibble(TIMESTAMP = sfn[,"TIMESTAMP"] %>%mutate(TIMESTAMP = as.numeric(lubridate::ymd(TIMESTAMP)))%>% unique() %>% pull()))
-
-  sfn %>% 
-    left_join(tibble(TIMESTAMP = sfn$TIMESTAMP %>% 
+    pred_FAPAR <- predict(model_fapar, tibble(TIMESTAMP = sfn[,"TIMESTAMP"] %>%
+                                                mutate(TIMESTAMP = as.numeric(lubridate::ymd(TIMESTAMP)))%>% 
+                                                unique() %>% pull()))
+    pred_LAI <- predict(model_lai, tibble(TIMESTAMP = sfn[,"TIMESTAMP"] %>%
+                                          mutate(TIMESTAMP = as.numeric(lubridate::ymd(TIMESTAMP)))%>% 
+                                          unique() %>% pull()))
+  
+    sfn %>% 
+      left_join(tibble(TIMESTAMP = sfn$TIMESTAMP %>% 
                        unique(), 
-                     FAPAR = pred_FAPAR) %>% 
-                filter(TIMESTAMP > min_data), 
-              by = "TIMESTAMP") %>% 
-    left_join(tibble(TIMESTAMP = sfn$TIMESTAMP %>% 
+                       FAPAR = pred_FAPAR) %>% 
+                  filter(TIMESTAMP > min_data)%>%
+                  mutate(FAPAR = case_when(FAPAR<0~0,
+                                           FAPAR>=0~FAPAR)),
+                by = "TIMESTAMP") %>% 
+      left_join(tibble(TIMESTAMP = sfn$TIMESTAMP %>% 
                        unique(),  LAI = pred_LAI) %>%
-                filter(TIMESTAMP > min_data) %>% 
-                mutate(LAI = case_when(LAI<0~0,
-                                       LAI>=0~LAI)),
-              by = "TIMESTAMP") %>% 
-    left_join(fapar_filled, by = "TIMESTAMP")%>%
-    mutate(FAPAR = case_when(FAPAR<0~0,
-                             FAPAR>=0~FAPAR))
+                  filter(TIMESTAMP > min_data) %>% 
+                  mutate(LAI = case_when(LAI<0~0,
+                                        LAI>=0~LAI)),
+                by = "TIMESTAMP") %>% 
+    left_join(fapar_filled, by = "TIMESTAMP")
+    
+  }else{
+    sfn %>%
+      left_join(fapar_filled, by = "TIMESTAMP") %>% 
+      mutate(FAPAR = mean(Fapar,na.rm = TRUE),
+             LAI = mean(Lai,na.rm = TRUE))
+  }
 }
 
 

@@ -1,15 +1,15 @@
 source("init_PREPARE_DATA_LIST.R")
 
 #### MODEL CALCULATION ####
-as.list(flx_files$sfn_sites)[[2]] %>%
-  purrr::map(function(x){
+as.list(flx_files$sfn_sites) %>%
+  furrr::future_map(function(x){
     #load SAPFLUXNET site and aggregation at daily level
     sfn <- read_sfn_data(x, folder = path) %>%
       sfn_metrics(period = "1 day", .funs = list(~ mean(., na.rm = TRUE)),
                   solar = TRUE, interval = "general") %>%
       sapfluxnetr::metrics_tidyfier(metadata = sfn_meta, interval = "general")
     
-    if (!is.na(sfn$st_soil_depth %>% unique())){sensors_d = sfn$st_soil_depth %>% unique()}else {sensors_d = 0.5}
+    if (!is.na(sfn$st_soil_depth %>% unique())){sensors_d = sfn$st_soil_depth %>% unique()} else {sensors_d = 0.5}
     #load FLUXNET and extract simplified variables if there is EC and SFN overlap
     
     flx_file <- flx_files[which(flx_files$sfn_sites == x),"flx_sites"]

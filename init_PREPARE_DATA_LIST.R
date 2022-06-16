@@ -13,13 +13,16 @@ library(mgcv)
 library(qgam)
 library(GauPro)
 source("dist_merge.R")
+library(furrr)
+plan('multisession', workers = 8)
+options('future.global.maxsize'=2*1024*1024^2)
 
 sapply(list('calc_sfn_aggr_E.R','calc_sfn_aggr_env.R','calc_sfn_scale.R',
             'swvl_aggregation.R','calc_optim_swc.R','do_phydro_params.R',
             'data_processing_functions.R'), source, .GlobalEnv)
 
 #### LOAD SAPFLUXNET DATA ####
-path <- "../0.1.5/RData/plant"
+path <- "../sapfluxnet_db/0.1.5/RData/plant"
 # sfn_meta <- sapfluxnetr::read_sfn_metadata(folder = path, .write_cache = TRUE)
 # save(sfn_meta, file = "DATA/sfn_meta.RData")
 
