@@ -39,8 +39,10 @@ calc_sfn_scale <- function(sfn_object, min_basal_area = 70){
               E_sp_perc = E_sp_ba * sp_basal_area_perc/100, #species transpiration normalized by species basal area
               .groups = "drop") %>% 
     group_by(TIMESTAMP) %>% 
-    summarise(E_stand = sum(E_sp_perc)*100/ba_perc*st_ba/1e4, #sum of total stand transpiration cm3 m-2(ground) h-1
-              E_stand_sd = sqrt(sum(E_sp_ba_variance)/dplyr::n_distinct(pl_species))*100/ba_perc*st_ba/1e4) #sum of total stand transpiration cm3 m-2(ground) h-1
+    filter(!is.na(E_sp_ba)) %>% 
+    summarise(E_stand_QF = sum(sp_basal_area_perc) == ba_perc, #Is E stand calculated with all the measured species?
+              E_stand = sum(E_sp_perc)*100/ba_perc*st_ba/1e4, #sum of total stand transpiration cm3 m-2(ground) h-1
+              E_stand_sd = sqrt(sum(E_sp_ba_variance, na.rm = TRUE)/dplyr::n_distinct(pl_species))*100/ba_perc*st_ba/1e4) #sum of total stand transpiration cm3 m-2(ground) h-1
   
 }
 

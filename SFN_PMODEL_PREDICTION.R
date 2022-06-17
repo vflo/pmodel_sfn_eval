@@ -39,7 +39,7 @@ as.list(list_files) %>%
                           sensitivity_psi = c(rep(1,11), seq(0.5,1.5,0.1))) %>% distinct()
     
     #subset 
-    df <- df[c(10:100),]
+    # df <- df[c(10:100),]
     # df$swvl <- df$swc_shallow
     # df <- df %>% filter(vpd>=1)
     
@@ -92,7 +92,7 @@ as.list(list_files) %>%
     #     calc_pmodel_ecrit(df, PHYDRO_TRUE, par_plant_std, soil,x)%>% as_tibble()
     #   }) %>% bind_rows() -> pmodel_ecrit
     
-    
+    if(exists('phydro')){
     df_res <- pmodel %>% 
       bind_rows(pmodel_swc) %>% 
       bind_rows(phydro) %>% 
@@ -101,7 +101,10 @@ as.list(list_files) %>%
       bind_rows(wap) %>%
       # bind_rows(pmodel_ecrit) %>%
       suppressMessages()
-    # 
+    }else{
+      df_res<- pmodel %>% 
+        bind_rows(pmodel_swc)
+    }
     
     df_res$grp <- format(df_res$TIMESTAMP, "%Y")
     df_res %>%

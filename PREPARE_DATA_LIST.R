@@ -40,11 +40,14 @@ as.list(flx_files$sfn_sites) %>%
     #use in site swc if present
     if(all(is.na(sfn$swc_shallow))){
       sfn <- sfn %>% 
-        mutate(swc_shallow = swvl2)
+        mutate(swc_shallow = swvl2,
+               is_st_swc_shallow = FALSE)
     }else{
       swc_model <- lm(swc_shallow ~ swvl2,data=sfn)
       sfn <- sfn %>% 
-        mutate(swc_shallow = case_when(is.na(swc_shallow) ~ swc_model$coefficients[1]+swc_model$coefficients[2]*swvl2,
+        mutate(is_st_swc_shallow = case_when(is.na(swc_shallow) ~ FALSE,
+                                             !is.na(swc_shallow) ~ TRUE),
+               swc_shallow = case_when(is.na(swc_shallow) ~ swc_model$coefficients[1]+swc_model$coefficients[2]*swvl2,
                                        !is.na(swc_shallow) ~ swc_shallow))
     }
     
@@ -81,7 +84,13 @@ as.list(flx_files$sfn_sites) %>%
       }
     
     sfn <- sfn %>% bind_cols(soil) %>% 
-      mutate(st_clay_perc = case_when(is.na(st_clay_perc)~ clay,
+      mutate(is_st_clay = case_when(is.na(st_clay_perc)~ FALSE,
+                                    !is.na(st_clay_perc)~ TRUE),
+             is_st_sand = case_when(is.na(st_sand_perc)~ FALSE,
+                                    !is.na(st_sand_perc)~ TRUE),
+             is_st_soil_depth = case_when(is.na(st_soil_depth)~ FALSE,
+                                          !is.na(st_soil_depth)~ TRUE),
+             st_clay_perc = case_when(is.na(st_clay_perc)~ clay,
                                       !is.na(st_clay_perc)~ st_clay_perc),
              st_sand_perc = case_when(is.na(st_sand_perc)~ sand,
                                       !is.na(st_sand_perc)~ st_sand_perc),
@@ -96,7 +105,9 @@ as.list(flx_files$sfn_sites) %>%
     #join elevation and set it if NA
     sfn <- sfn %>% 
       left_join(elevation %>% dplyr::select(si_code, elevation),by = c("si_code")) %>% 
-      mutate(si_elev = case_when(is.na(si_elev) ~ elevation,
+      mutate(is_si_elev = case_when(is.na(si_elev) ~ FALSE,
+                                    TRUE ~ TRUE),
+             si_elev = case_when(is.na(si_elev) ~ elevation,
                                  TRUE ~ si_elev)) %>% 
       dplyr::select(-elevation)
     
