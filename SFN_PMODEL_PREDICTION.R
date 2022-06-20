@@ -60,6 +60,22 @@ as.list(list_files) %>%
         calc_phydro(df, PHYDRO_TRUE, par_plant_std, soil, x) %>% as_tibble()
       })  %>%  bind_rows() -> phydro 
     
+    # PHydro-Wang if there is species information 
+    print("Calculating PHYDRO-WANG")
+    sensitivity[6,]  %>% 
+      split(seq(nrow(.)))%>%
+      purrr::map(function(x){
+        calc_phydro_wang(df, PHYDRO_TRUE, par_plant_std, soil, x) %>% as_tibble()
+      })  %>%  bind_rows() -> phydro_wang 
+    
+    # PHydro-Wap if there is species information 
+    print("Calculating PHYDRO-WAP")
+    sensitivity[6,]  %>% 
+      split(seq(nrow(.)))%>%
+      purrr::map(function(x){
+        calc_phydro_wap(df, PHYDRO_TRUE, par_plant_std, soil, x) %>% as_tibble()
+      })  %>%  bind_rows() -> phydro_wap 
+    
     # Sperry model
     print("Calculating SPERRY model")
     sensitivity[6,] %>% 

@@ -105,6 +105,108 @@ calc_phydro <- function(df_temp, PHYDRO_TRUE, par_plant, soil, sensi){
   }
 } 
 
+
+#### PHYDRO WANG MODEL ####
+calc_phydro_wang <- function(df_temp, PHYDRO_TRUE, par_plant, soil, sensi){
+  #filter
+  temp <- df_temp %>%  
+    filter(!is.na(ta),!is.na(FAPAR),!is.na(ppfd_in), !is.na(vpd),FAPAR > 0, ppfd_in > 0, LAI>0, swvl > 0.01)
+  
+  #sensitivity analysis
+  par_plant$psi50 <- par_plant$psi50 * sensi$sensitivity_psi
+  par_plant$conductivity <- par_plant$conductivity * sensi$sensitivity_K
+  
+  if(PHYDRO_TRUE && nrow(temp)>0){
+    temp%>%
+      split(seq(nrow(.)))%>%
+      purrr::map_df(function(x){
+        # print(x$timestamp_aggr)
+        if( is.na(x$st_soil_depth)){ x$st_soil_depth <- soil$depth*100}
+        psi_soil <- medfate::soil_psi(medfate::soil(tibble(widths = x$st_soil_depth*10, clay = x$st_clay_perc, 
+                                                           sand = x$st_sand_perc, om = soil$OM, bd = soil$bd, rfc = 70),
+                                                    W =x$swvl/soil_thetaSATSX(clay = x$st_clay_perc, sand = x$st_sand_perc, om = soil$OM)), 
+                                      model = "SX")
+        res <- model_numerical(tc             = x$ta, 
+                               ppfd           = x$ppfd_in, 
+                               vpd            = x$vpd*1000, 
+                               nR             = x$netrad, 
+                               co2            = x$CO2, 
+                               LAI            = x$LAI,
+                               elv            = x$si_elev, 
+                               fapar          = (x$FAPAR),
+                               kphio          = calc_ftemp_kphio(x$ta), 
+                               psi_soil       = psi_soil, 
+                               par_plant      = par_plant,
+                               stomatal_model = "phydro_wang") %>% 
+          as_tibble()
+        
+        
+        res_temp <- x %>% 
+          bind_cols(res) %>% 
+          bind_cols(sensi) %>% 
+          bind_cols(psi_soil = psi_soil) %>%
+          bind_cols(model_type = "phydro_wang") %>% 
+          mutate(E = E*3600) #transform to mol m-2 (ground) h-1
+        
+        return(res_temp)
+      })
+  }else{
+    df_temp; print("PHYDRO - WANG model was not computed")
+    return(temp)
+  }
+} 
+
+
+#### PHYDRO WAP MODEL ####
+calc_phydro_wap <- function(df_temp, PHYDRO_TRUE, par_plant, soil, sensi){
+  #filter
+  temp <- df_temp %>%  
+    filter(!is.na(ta),!is.na(FAPAR),!is.na(ppfd_in), !is.na(vpd),FAPAR > 0, ppfd_in > 0, LAI>0, swvl > 0.01)
+  
+  #sensitivity analysis
+  par_plant$psi50 <- par_plant$psi50 * sensi$sensitivity_psi
+  par_plant$conductivity <- par_plant$conductivity * sensi$sensitivity_K
+  
+  if(PHYDRO_TRUE && nrow(temp)>0){
+    temp%>%
+      split(seq(nrow(.)))%>%
+      purrr::map_df(function(x){
+        # print(x$timestamp_aggr)
+        if( is.na(x$st_soil_depth)){ x$st_soil_depth <- soil$depth*100}
+        psi_soil <- medfate::soil_psi(medfate::soil(tibble(widths = x$st_soil_depth*10, clay = x$st_clay_perc, 
+                                                           sand = x$st_sand_perc, om = soil$OM, bd = soil$bd, rfc = 70),
+                                                    W =x$swvl/soil_thetaSATSX(clay = x$st_clay_perc, sand = x$st_sand_perc, om = soil$OM)), 
+                                      model = "SX")
+        res <- model_numerical(tc             = x$ta, 
+                               ppfd           = x$ppfd_in, 
+                               vpd            = x$vpd*1000, 
+                               nR             = x$netrad, 
+                               co2            = x$CO2, 
+                               LAI            = x$LAI,
+                               elv            = x$si_elev, 
+                               fapar          = (x$FAPAR),
+                               kphio          = calc_ftemp_kphio(x$ta), 
+                               psi_soil       = psi_soil, 
+                               par_plant      = par_plant,
+                               stomatal_model = "phydro_wap") %>% 
+          as_tibble()
+        
+        
+        res_temp <- x %>% 
+          bind_cols(res) %>% 
+          bind_cols(sensi) %>% 
+          bind_cols(psi_soil = psi_soil) %>%
+          bind_cols(model_type = "phydro_wap") %>% 
+          mutate(E = E*3600) #transform to mol m-2 (ground) h-1
+        
+        return(res_temp)
+      })
+  }else{
+    df_temp; print("PHYDRO - WANG model was not computed")
+    return(temp)
+  }
+} 
+
 #### SPERRY MODEL ####
 calc_sperry <- function(df_temp, PHYDRO_TRUE, par_plant, soil, sensi){
   #filter
