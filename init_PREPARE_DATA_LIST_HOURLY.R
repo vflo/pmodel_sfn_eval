@@ -58,8 +58,10 @@ load("DATA/PSI_DF.RData")
 PSI_DF <- as_tibble(PSI_DF)
 
 #load SW ERA5
-load("DATA/SW_IN_ERA5_HOURLY.RData")
+load("DATA/sw_ERA5_18.RData")
 sw_ERA5 <- as_tibble(sw_ERA5_18)
+# load("DATA/SW_IN_ERA5_HOURLY.RData")
+# sw_ERA5 <- as_tibble(sw_ERA5_18)
 
 #load FAPAR
 fapar <-read_csv("DATA/FAPAR_sites.csv")

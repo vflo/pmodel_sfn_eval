@@ -4,6 +4,7 @@ source("init_PREPARE_DATA_LIST_HOURLY.R")
 as.list(flx_files$sfn_sites) %>%
   furrr::future_map(function(x){
     #load SAPFLUXNET site and aggregation at daily level
+    library(sapfluxnetr)
     sfn <- read_sfn_data(x, folder = path) %>%
       sfn_metrics(period = "1 hour", .funs = list(~ mean(., na.rm = TRUE)),
                   solar = TRUE, interval = "general") %>%
@@ -32,11 +33,14 @@ as.list(flx_files$sfn_sites) %>%
     
     #join soil water content from ERA5-land
     # df_swc <- dist_merge(df_swc, sfn %>% select(si_code,si_lat,si_long) %>% unique(), 'si_lat', 'si_long', 'si_lat', 'si_long')
-    sfn <- sfn %>% 
+    sfn <- sfn %>% mutate(DATE = lubridate::date(TIMESTAMP)) %>% 
       left_join(df_swc%>%
                   group_by(si_code) %>% 
-                  mutate(max_swvl = max(swvl2, na.rm = TRUE)), 
-                by=c("TIMESTAMP","si_code")) 
+                  mutate(max_swvl = max(swvl2, na.rm = TRUE),
+                         DATE = lubridate::date(TIMESTAMP)) %>% 
+                  dplyr::select(-TIMESTAMP), 
+                by=c("DATE","si_code")) %>% 
+      dplyr::select(-DATE)
     
     #if there is no column add it filled with NA
     sfn <- add_miss_var(sfn)
@@ -154,6 +158,6 @@ as.list(flx_files$sfn_sites) %>%
     
     sfn_list <- LIST(sfn, PHYDRO_TRUE, par_plant_std, opt_swc, soil)
     
-    save(sfn_list, file = paste0("DATA/PREPARED_DATA_LIST/",x,".RData"))
+    save(sfn_list, file = paste0("DATA/PREPARED_DATA_LIST_HOURLY/",x,".RData"))
     
   })

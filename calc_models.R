@@ -55,6 +55,43 @@ calc_pmodel_swc <- function(df_temp, meanalpha, soil, par_plant){
   }else{df_temp; print("Pmodel using soil water limitation was not computed")}
 }
 
+
+#### PMODEL SUBDAILY MODEL ####
+calc_pmodel_subdaily <- function(df_temp, soil, par_plant){
+  df_temp %>% 
+    split(seq(nrow(.))) %>%
+    purrr::map_df(function(x){
+      if( is.na(x$st_soil_depth)){ x$st_soil_depth <- soil$depth*100}
+      medfate::soil_psi(medfate::soil(tibble(widths = x$st_soil_depth*10, 
+                                             clay = x$st_clay_perc,
+                                             sand = x$st_sand_perc, 
+                                             om = soil$OM, 
+                                             bd = soil$bd, 
+                                             rfc = 70),
+                                      W =x$swvl/soil_thetaSATSX(clay = x$st_clay_perc, 
+                                                                sand = x$st_sand_perc, 
+                                                                om = soil$OM)), 
+                        model = "SX")->psi_soil
+      return(tibble(psi_soil = psi_soil))
+      })->psi_soil
+      
+      res <- rpmodel_subdaily(TIMESTAMP = df_temp$TIMESTAMP, tc=df_temp$ta, vpd=df_temp$vpd*1000, co2=df_temp$CO2, 
+                              fapar= df_temp$FAPAR, ppfd = df_temp$ppfd_in, sw_in = df_temp$sw_in,
+                              do_soilmstress = FALSE, elv=df_temp$si_elev %>% unique()) %>% 
+        as_tibble()
+      
+      
+      res_temp <- df_temp %>% 
+        bind_cols(low_swp = FALSE) %>% 
+        bind_cols(res) %>%
+        # bind_cols(p_leaf = psi_l) %>%
+        bind_cols(psi_soil = psi_soil) %>%
+        bind_cols(model_type = "pmodel") %>% 
+        mutate(E = 1.6*gs*(vpd*1000)*3600*1e-6,
+               gs = gs) #umol m-2(ground) s-1 Pa-1
+      return(res_temp)
+}
+
 #### PHYDRO MODEL ####
 calc_phydro <- function(df_temp, PHYDRO_TRUE, par_plant, soil, sensi){
   #filter

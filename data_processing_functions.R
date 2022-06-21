@@ -250,6 +250,50 @@ data_prep <- function(df_sfn, env, opt_swc){
 }
 
 
+data_prep_hourly <- function(df_sfn, env, opt_swc){
+  df_sfn %>% 
+    left_join(env) %>%
+    bind_cols(tibble(opt_swc_slope = opt_swc[1],opt_swc_int =  opt_swc[2])) %>% 
+    # filter(!is.na(E_stand)) %>% 
+    # filter(lubridate::date(TIMESTAMP) >= lubridate::ymd(20140101), lubridate::date(TIMESTAMP) < lubridate::ymd(20150101)) %>%
+    mutate(E_sapflow = E_stand/18.2, #mol m-2 h-1
+           E_sapflow_sd = E_stand_sd/18.2, #mol m-2 h-1
+           PPFD = PPFD*1e6/86400,
+           ppfd_ERA5 = sw_ERA5 * 2.114, #transform sw ERA5 to ppfd
+           netr = netr*1e6/86400,
+           patm = rpmodel::calc_patm(si_elev %>% unique()),
+           swvl = swvl_aggregation(st_soil_depth,swvl1,swvl2,swvl3,swvl4),
+           REW = swvl/max_swvl,
+           # swvl = swc_shallow,
+           swvl =  opt_swc_slope*swvl+opt_swc_int,
+           # REW = (swvl-min(swvl,na.rm = TRUE))/(max(swvl,na.rm = TRUE)-min(swvl,na.rm = TRUE)),
+           vpd = case_when(is.na(vpd)~ VPD/1000,
+                           !is.na(vpd)~ vpd),
+           ta = case_when(is.na(ta)~ tc,
+                          !is.na(ta)~ ta),
+           ppfd_in = case_when(is.na(ppfd_in) & !is.na(PPFD) ~ PPFD, #if there is ppfd in SFN, use if not use PPFD from EC and if not use ppfd calculated from SW from ERA5
+                               is.na(ppfd_in) & is.na(PPFD) ~ ppfd_ERA5,
+                               !is.na(ppfd_in) ~ ppfd_in),
+           netrad = case_when(is.na(netrad)~ netr,
+                              !is.na(netrad)~ netrad),
+           CO2 = case_when(is.na(CO2) ~ 400,
+                           !is.na(CO2) ~ CO2),
+           patm = rpmodel::calc_patm(si_elev),
+           Gs_sapflow = E_sapflow / (vpd*1000) / 1.6 / 3600*1e6, #umol m-2(ground) s-1 Pa-1
+           Gs_sapflow_sd = E_sapflow_sd / (vpd*1000) / 1.6 / 3600*1e6) %>% 
+    filter(!is.na(REW))->df
+  
+  # fit_ws <- lm(ws~0+ws_ERA, data =df) %>% summary()
+  if(any(names(df) == "ws")){
+    df <- df %>% mutate(ws = case_when(is.na(ws)~2,
+                                       !is.na(ws)~ws))
+  }else{df <- df %>% mutate(ws =2)}
+  
+  return(df)
+}
+
+
+
 LIST <- function(...) {
   nms <- sapply(as.list(substitute(list(...))), deparse)[-1]
   setNames(list(...), nms)

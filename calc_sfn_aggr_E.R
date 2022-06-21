@@ -3,7 +3,7 @@
 #' Summarise transpiration data at the desired time aggregation level.
 #'
 #' @param sfn_scale tibble object, an object as the output of calc_sfn_scale()
-#' @param time_aggregation character, time aggregation as "1 hour", "3 hour", "1 day", "1 week", "1 month"
+#' @param time_aggregation character, time aggregation as "1 day", "1 week", "1 month"
 #'
 #' @return tibble, time aggregated Ttranspiration as mean values.
 #'
@@ -11,13 +11,13 @@
 #'
 #' @export
 #'
-calc_sfn_aggr_E <- function(sfn_scale, time_aggregation = "1 hour"){
+calc_sfn_aggr_E <- function(sfn_scale, time_aggregation = "1 week"){
   #check if sfn_object is a tibble. If not, stop calculation.
   if(!is_tibble(sfn_scale)){stop("sfn_scale should be a tibble object as the output of calc_sfn_scale function")}
   #check if time_aggregation is a character string. If not, stop calculation.
   if(!is.character(time_aggregation)){stop("time_aggregation should be a character string")}
   #check if the aggregation time value is valid. If not, stop calculation.
-  valid_time <- c("1 hour", "3 hour", "1 day", "1 week", "1 month")
+  valid_time <- c("1 day", "1 week", "1 month")
   if(!time_aggregation %in% valid_time){
     stop(paste0("The time aggregation '", time_aggregation, 
                 "' is not a valid entry."))}
@@ -28,6 +28,7 @@ calc_sfn_aggr_E <- function(sfn_scale, time_aggregation = "1 hour"){
     # mutate(key  = row_number()) %>%
     as_tsibble(index = TIMESTAMP)# %>%
     # dplyr::select(-key)
+  
   
   if(time_aggregation == "3 hour" ){
     E_data <- E_data %>% 
