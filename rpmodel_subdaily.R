@@ -1,3 +1,5 @@
+## Original code Giulia Mengoli
+
 #' Invokes a P-model function call for sub-daily estimations accounting for acclimation
 #'
 #' R implementation of the P-model and its 
@@ -91,6 +93,7 @@
 #'  "daily" approach uses average daytime conditions. "max_rad" uses average of daytime 
 #'  conditions around the point of maximum radiation.
 #' @param hour_reference_T numeric from 0 to 23. Reference time for the upscaling process.
+#' @param gap_method character string of the method used to do gapfilling. Accepted values are "linear" or "continous".
 #'  
 #'
 #' @return A named list of numeric values (including temperature and pressure 
@@ -263,17 +266,44 @@ rpmodel_subdaily <- function(
     beta = 146.0, c_cost = 0.41, soilm = 1.0, meanalpha = 1.0, apar_soilm = 0.0, bpar_soilm = 0.73300,
     c4 = FALSE, method_optci = "prentice14", method_jmaxlim = "wang17",
     do_ftemp_kphio = TRUE, do_soilmstress = FALSE, returnvar = NULL, verbose = FALSE,
-    upscaling_method = c("noon","daily","max_rad"), hour_reference_T = 12
+    upscaling_method = c("noon","daily","max_rad"), hour_reference_T = 12, gap_method = "linear",
+    xi_acclimated = "on"
 ){
   
+  #---- Fixed parameters--------------------------------------------------------
+  c_molmass <- 12.0107  # molecular mass of carbon (g)
+  #'
+  kPo <- 101325.0       # standard atmosphere, Pa (Allen, 1973)
+  kTo <- 25.0           # base temperature, deg C (Prentice, unpublished)
+  rd_to_vcmax <- 0.015  # Ratio of Rdark to Vcmax25, number from Atkin et al., 2015 for C3 herbaceous
+  
+  #---- soil moisture stress as a function of soil moisture and mean alpha -----
+  if (do_soilmstress) {
+    if (length(meanalpha) > 1){
+      warning("Argument 'meanalpha' has length > 1. Only the first element is used.")
+      meanalpha <- meanalpha[1]
+    }
+    soilmstress <- calc_soilmstress( soilm, meanalpha, apar_soilm, bpar_soilm )
+  }
+  else {
+    soilmstress <- 1.0
+  }
+  
   # 1.0 Calculate P model without acclimation
-  df_Or <- rpmodel::rpmodel(tc, vpd, co2, fapar, ppfd, patm, elv, kphio, beta, c_cost, 
+  tibble(tc, vpd, co2, fapar, ppfd) %>% 
+    split(seq(nrow(.))) %>%
+    purrr::map_df(function(x){
+    res <- rpmodel::rpmodel(x$tc, x$vpd, x$co2, x$fapar, x$ppfd, patm, elv, kphio, beta, c_cost, 
                             soilm, meanalpha, apar_soilm, bpar_soilm, c4, method_optci, 
                             method_jmaxlim, do_ftemp_kphio, do_soilmstress , returnvar, 
-                            verbose)
+                            verbose) %>% 
+      as_tibble()
+    return(res)
+    }) -> df_Or
   
   # 2.0 Create df for upscaling
-  dfIn <- tibble(YEAR = lubridate::year(TIMESTAMP),
+  dfIn <- tibble(TIMESTAMP = TIMESTAMP,
+                 YEAR = lubridate::year(TIMESTAMP),
                  MONTH = lubridate::month(TIMESTAMP),
                  DAY = lubridate::day(TIMESTAMP),
                  HOUR = lubridate::hour(TIMESTAMP),
@@ -296,135 +326,76 @@ rpmodel_subdaily <- function(
   
   
   # 4.0 Calculate P-model on daily upscaling values
-  df_Mm <- rpmodel::rpmodel(dataDaily$tc, dataDaily$vpd, dataDaily$co2, dataDaily$fapar, 
-                            dataDaily$ppfd, patm, unique(elv), kphio, beta, c_cost, 
+  tibble(dataDaily) %>% 
+    split(seq(nrow(.))) %>%
+    purrr::map_df(function(x){
+      res <- rpmodel::rpmodel(x$tc, x$vpd, x$co2, x$fapar, 
+                            x$ppfd, patm, unique(elv), kphio, beta, c_cost, 
                             soilm, meanalpha, apar_soilm, bpar_soilm, c4, method_optci, 
                             method_jmaxlim, do_ftemp_kphio, do_soilmstress , returnvar, 
-                            verbose)
+                            verbose)%>% 
+        as_tibble()
+      return(res)
+    }) -> df_Mm
   
   
   # 5.0 Downscale from daily to subdaily
-  dfReplicate = dfIn[,c("YEAR","MONTH","DAY","HOUR","MINUTE")]
-  
-  dfReplicate[,'KOpt'] = NA
-  dfReplicate[,'GammaStarOpt'] = NA
-  dfReplicate[,'viscosityOpt'] = NA
-  
-  dfReplicate[,'xiOpt'] = NA
-  dfReplicate[,'ciOpt'] =NA
-  
-  dfReplicate[,'VPDOpt'] = NA
-  dfReplicate[,'CO2Opt'] = NA
-  dfReplicate[,'caOpt'] = NA
-  dfReplicate[,'IabsOpt'] = NA
-  dfReplicate[,'TempOpt'] = NA
-  
-  
-  # xiAcclimated option: 'off'/'on'
-  dfReplicate[,'vcmaxOpt'] = NA     
-  dfReplicate[,'JmaxOpt'] = NA      
-  
   dataDaily = dataDaily %>% cbind(df_Mm) 
   
-  while (nrow(dataDaily) > 0 ) {
-    posValues = which(
-      dfReplicate[,'YEAR'] == dataDaily[,'YEAR'][1] &
-        dfReplicate[,'MONTH'] == dataDaily[,'MONTH'][1] &
-        dfReplicate[,'DAY'] == dataDaily[,'DAY'][1] &
-        dfReplicate[,'HOUR'] == dataDaily[,'HOUR'][1] &
-        dfReplicate[,'MINUTE'] == dataDaily[,'MINUTE'][1]
-    )
-    dfReplicate[,'KOpt'][posValues] = dataDaily[,'kmPa'][1]
-    dfReplicate[,'GammaStarOpt'][posValues] = dataDaily[,'GammaStarM'][1]
-    dfReplicate[,'viscosityOpt'][posValues] = dataDaily[,'viscosityH2oStar'][1]
-    dfReplicate[,'xiOpt'][posValues] = dataDaily[,'xiPaM'][1]                    # xiAcclimated: 'off'
-    # dfReplicate[,'xiOpt'][posValues] = dataDaily[,'xiPa'][1]
-    dfReplicate[,'ciOpt'][posValues] = dataDaily[,'ciM'][1]                      # xiAcclimated: 'off'
-    # dfReplicate[,'ciOpt'][posValues] = dataDaily[,'ci'][1]
-    dfReplicate[,'VPDOpt'][posValues] = dataDaily[,'VPDPa'][1]
-    dfReplicate[,'CO2Opt'][posValues] = dataDaily[,'CO2'][1]
-    dfReplicate[,'caOpt'][posValues] = dataDaily[,'ca'][1]
-    dfReplicate[,'IabsOpt'][posValues] = dataDaily[,'Iabs'][1]
-    # if xiAcclimated is ON vcmaxOpt and JmaxOpt will be overwritten
-    dfReplicate[,'vcmaxOpt'][posValues] = dataDaily[,'vcmaxPmodelM1'][1]  # xiAcclimated: 'off'
-    dfReplicate[,'JmaxOpt'][posValues] = dataDaily[,'JmaxM1'][1]          # xiAcclimated: 'off'
-    
-    
-    # AVERAGE TEMPERATURE
-    dfReplicate[,'TempOpt'][posValues] = dataDaily[,'Ta'][1]
-    
-    dataDaily = dataDaily[-1,] 
-  }
+  DF <- dfIn  %>% 
+    cbind(df_Or) %>% 
+    left_join(dataDaily %>%
+                dplyr::select(-c("YEAR","MONTH","DAY","HOUR","MINUTE")) %>% 
+                rename_with( ~ paste0(.x, "_opt"), where(is.numeric)),
+              by = "TIMESTAMP")
   
-  # gapFilling function (set what type of approach 'i.e. constant' in the file setting)----
-  for (col in colnames(dfReplicate)) {
-    if ( col == 'YEAR') next
-    if ( col == 'MONTH') next
-    if ( col == 'DAY') next
-    if ( col == 'HOUR') next
-    if ( col == 'MINUTE') next
-    cat(sprintf('%s gap = %d\n',col,sum(is.na(dfReplicate[,col]))))
-    dfReplicate[,col] = gapFilling(v = dfReplicate[,col],
-                                   vYear = dfReplicate[,'YEAR'],
-                                   vMonth = dfReplicate[,'MONTH'],
-                                   vDay = dfReplicate[,'DAY'],
-                                   vHour = dfReplicate[,'HOUR'],
-                                   vMinute = dfReplicate[,'MINUTE'],
-                                   approccio = df_settaggio$method_gf_replicate)
-    cat(sprintf('%s post gap = %d\n',col,sum(is.na(dfReplicate[,col]))))
-  }
-  rm(col)
+  
+  #### GAP- FILLING
+  DF <- lapply(DF, function(y) {
+    if (is.numeric(x)) { 
+      approx(as.numeric(DF$TIMESTAMP), y, method = gap_method, 
+             xout = as.numeric(DF$TIMESTAMP), rule = 2, ties = "constant")$y
+      }else{
+        x
+      }
+    }
+    ) %>% bind_cols()
   
   # OPTIMAL Vcmax and Jmax----
   # Vcmax with acclimated 'xiPa', 'ci' and 'phi0' (ON)
-  if (df_settaggio$xi_acclimated == 'off') {
-    cat(sprintf('vcmaxOpt and JmaxOpt replicated\n'))
-    dfReplicate[,'ci'] = NA
-    dfReplicate[,'xiPa'] = NA
+  if (xi_acclimated == 'off') {
+    cat(sprintf('vcmax_opt and jmax_opt from upscaling\n'))
+    DF[,'ci'] = NA
+    DF[,'xiPa'] = NA
   } else {
     
-    cat(sprintf('vcmaxOpt and JmaxOpt calculated\n'))
+    cat(sprintf('vcmax_opt and jmax_opt calculated\n'))
     
     # Intrinsic quantum efficiency of photosynthesis (phi0)
-    if (is.na(df_settaggio$phi0_method) ) {
-      
-      phi0 =(1/8) *(0.352+0.022*modelloOr[,'Ta'] -
-                      0.00034*modelloOr[,'Ta']^(2) )      # Temperature dependence function of phi0 (Bernacchi et al.,2003)
-    } else {
-      phi0 = phi0Method
-    }
-    
-    c=0.41                        # cost factor for electron transport capacity
-    
+    phi0 = (1/8) *(0.352 + 0.022*DF$tc_opt - 0.00034*DF$tc_opt^(2))       # Temperature dependence function of phi0 (Bernacchi et al.,2003)
+
     # acclimated xiPa (parameter that determines the sensitivity of ci/ca to VPD)
-    betha = 146
-    
-    dfReplicate[,'xiPa'] = sqrt ( (betha * (dfReplicate[,'KOpt'] +
-                                              dfReplicate[,'GammaStarOpt']) ) /
-                                    (1.6 * dfReplicate[,'viscosityOpt']) )                      # [Pa^1/2]
+    DF$xiPa = sqrt((beta*(DF$kmm_opt + DF$gammastar_opt))/(1.6*DF$ns_star_opt))                      # [Pa^1/2]
     
     # acclimated ci (with acclimated xiPa, and adjusted with the actual VPD)
-    dfReplicate[,'ci'] = ( dfReplicate[,'xiPa'] * dfReplicate[,'caOpt'] +
-                             dfReplicate[,'GammaStarOpt']*sqrt(modelloOr[,'VPDPa']))/(
-                               dfReplicate[,'xiPa']+sqrt(modelloOr[,'VPDPa']))
+    DF$ci = (DF$xiPa * DF$ca_opt + DF$gammastar_opt*sqrt(DF$vpd))/(
+                               DF$xiPa + sqrt(DF$vpd))
     
     
     # OPTIMAL Vcmax
-    dfReplicate[,'vcmaxOpt']  = phi0 * dfReplicate[,'IabsOpt'] *
-      ((dfReplicate[,'ci'] + dfReplicate[,'KOpt']) / (dfReplicate[,'ci'] +
-                                                        2*dfReplicate[,'GammaStarOpt'])) *
-      sqrt (1-(c * (dfReplicate[,'ci']+2*dfReplicate[,'GammaStarOpt'])/(
-        dfReplicate[,'ci']-dfReplicate[,'GammaStarOpt']))^(2/3))                                        # [micromol/m2s]
+    DF$vcmax_opt  = phi0 * DF$ppfd_opt*DF$fapar_opt *
+      ((DF$ci + DF$kmm_opt) / (DF$ci + 2*DF$gammastar_opt)) *
+      sqrt(1 - (c*(DF$ci + 2*DF$gammastar_opt)/(DF$ci - DF$gammastar_opt))^(2/3))                                        # [micromol/m2s]
     
     # OPTIMAL Jmax
-    dfReplicate[,'JmaxOpt']  = ( 4 * phi0 * dfReplicate[,'IabsOpt'] ) / sqrt (
-      1 / ( 1 - ( c * ( dfReplicate[,'ci'] + 2*dfReplicate[,'GammaStarOpt'] ) /
-                    ( dfReplicate[,'ci'] - dfReplicate[,'GammaStarOpt'] ) ) ^ (2.0/3.0) ) - 1 )           #[micromol/m2s]
+    DF$jmax_opt  = (4 * phi0 * DF$ppfd_opt*DF$fapar_opt) / 
+      sqrt(1/(1 - (c_cost*( DF$ci + 2*DF$gammastar_opt)/
+                     (DF$ci - DF$gammastar_opt))^(2.0/3.0)) - 1)           #[micromol/m2s]
   }
   
-  # Optimal and actual temperature conversion
-  dfReplicate[,'topt'] = dfReplicate[,'TempOpt'] + 273.15                               # [K]   
-  dfReplicate[,'tk'] = modelloOr[,'Ta'] + 273.15                                        # [K]
+  # Optimal and actual temperature conversion to Kelvin
+  DF$tk_opt = DF$tc_opt + 273.15                               # [K]   
+  DF$tk = DF$tc + 273.15                                        # [K]
   
   # INSTANTANEOUS Vcmax and Jmax----
   # The Arrhenius equation constants:
@@ -433,78 +404,163 @@ rpmodel_subdaily <- function(
   Rgas = 8.314                     # J/mol*K
   
   
-  dfReplicate[,'vcmaxAdjusted'] = dfReplicate[,'vcmaxOpt'] * exp( (Ha / Rgas)*
-                                                                    (1/dfReplicate[,'topt'] - 1/dfReplicate[,'tk']))
-  
-  dfReplicate[,'JmaxAdjusted'] = dfReplicate[,'JmaxOpt'] * exp( (Haj / Rgas)*
-                                                                  (1/dfReplicate[,'topt'] - 1/dfReplicate[,'tk']))
+  DF$vcmaxAdjusted = DF$vcmax_opt * exp((Ha/Rgas)*(1/DF$tk_opt - 1/DF$tk))
+  DF$jmaxAdjusted = DF$jmax_opt * exp((Haj/Rgas)*(1/DF$tk_opt - 1/DF$tk))
   
   rm(Rgas,Ha,Haj)
   
   
-  # CALCULATE the assimilation rate: Ac-----
-  if (df_settaggio$xi_acclimated == 'off') {
-    Ac <- dfReplicate[,'vcmaxAdjusted']*(modelloOr[,'ciM'] - modelloOr[,'GammaStarM']) /
-      (modelloOr[,'ciM'] + modelloOr[,'kmPa'])                                              #[micromol/m2s]
+  # instantaneous ci (with acclimated xiPa, and adjusted with the actual VPD)
+  DF$ci_inst = (DF$xiPa * DF$ca + DF$gammastar*sqrt(DF$vpd))/(DF$xiPa + sqrt(DF$vpd))
+
+  # instantaneous chi
+  DF$chi_inst = DF$ci_inst/DF$ca 
+  
+  # CALCULATE the assimilation rate: Ac
+  # acclimated Ac with the acclimated xiPa term
+  A_c = DF$vcmaxAdjusted*(DF$ci_inst - DF$gammastar)/(DF$ci_inst + DF$kmm)                                             #[micromol/m2s]
+
+  # acclimated AJ with the acclimated xiPa term
+  A_j = kphio * DF$fapar*DF$ppfd * (DF$ci - DF$gammastar)/(DF$ci + 2.0 * DF$gammastar) * DF$jmaxAdjusted    #[micromol/m2s]
+
+  
+  if(c4){
+    out_optchi <- list(
+      xi = DF$xiPa,
+      chi = DF$chi_inst,
+      mc = 1.0,
+      mj = 1.0,
+      mjoc = 1.0
+    )    
+    
   } else {
-    # acclimated Ac with the acclimated xiPa term
-    Ac = dfReplicate[,'vcmaxAdjusted']*(
-      dfReplicate[,'ci'] - modelloOr[,'GammaStarM']) /
-      (dfReplicate[,'ci'] + modelloOr[,'kmPa'])                                             #[micromol/m2s]
+    
+    ## alternative variables
+    gamma <- DF$gammastar / DF$ca
+    kappa <- DF$kmm / DF$ca
+    
+    ## use chi for calculating mj
+    mj <- (DF$chi_inst - gamma) / (DF$chi_inst + 2.0 * gamma)
+    
+    ## mc
+    mc <- (DF$chi_inst - gamma) / (DF$chi_inst + kappa)
+    
+    ## mj:mv
+    mjoc <- (DF$chi_inst + kappa) / (DF$chi_inst + 2.0 * gamma)
+    
+    # format output list
+    out_optchi <- list(
+      xi = DF$xiPa,
+      chi = DF$chi_inst,
+      mc = mc,
+      mj = mj,
+      mjoc = mjoc
+    )
+    
   }
   
+  #---- Corrolary preditions ---------------------------------------------------
+  ## intrinsic water use efficiency (in Pa)
+  iwue = (DF$ca - DF$ci_inst)/1.6
   
-  # CALCULATE the assimilation rate: AJ----
-  # Intrinsic quantum efficiency of photosynthesis [mol Co2/mol photons]
-  if (is.na(df_settaggio$phi0_method) ) {
-    phi0 =(1/8) *(0.352+0.022*modelloOr[,'Ta'] - 0.00034*modelloOr[,'Ta']^(2) )      
+  #---- Vcmax and light use efficiency -----------------------------------------
+  # Jmax limitation comes in only at this step
+  if (c4){
+    out_lue_vcmax <- lue_vcmax_c4(
+      kphio,
+      c_molmass,
+      soilmstress
+    )
+    
+  } else if (method_jmaxlim=="wang17"){
+    
+    ## apply correction by Jmax limitation
+    out_lue_vcmax <- lue_vcmax_wang17(
+      out_optchi,
+      kphio,
+      c_molmass,
+      soilmstress
+    )
+    
+  } else if (method_jmaxlim=="smith19"){
+    
+    out_lue_vcmax <- lue_vcmax_smith19(
+      out_optchi,
+      kphio,
+      c_molmass,
+      soilmstress
+    )
+    
+  } else if (method_jmaxlim=="none"){
+    
+    out_lue_vcmax <- lue_vcmax_none(
+      out_optchi,
+      kphio,
+      c_molmass,
+      soilmstress
+    )
+    
   } else {
-    phi0 = phi0_method
+    
+    stop("rpmodel(): argument method_jmaxlim not idetified.")
+    
   }
   
-  # electron transport rate (Smith equation)
-  dfReplicate[,'J'] =  (4 *phi0*modelloOr[,'Iabs'])/sqrt(1 + (
-    (4*phi0*modelloOr[,'Iabs'])/(dfReplicate[,'JmaxAdjusted']))^(2))
+  #---- Corrolary preditions ---------------------------------------------------
+  # Vcmax25 (vcmax normalized to 25 deg C)
+  ftemp25_inst_vcmax  <- ftemp_inst_vcmax( DF$tc, DF$tc_opt, tcref = 25.0 )
+  vcmax25_unitiabs  <- out_lue_vcmax$vcmax_unitiabs / ftemp25_inst_vcmax
   
-  if ( df_settaggio$xi_acclimated == 'off' ) {
-    AJ = (dfReplicate[,'J']/4)*(modelloOr[,'ciM'] - modelloOr[,'GammaStarM'])/(
-      modelloOr[,'ciM'] + 2*modelloOr[,'GammaStarM'])    
-  } else {# acclimated AJ with the acclimated xiPa term
-    AJ = (dfReplicate[,'J']/4)*(dfReplicate[,'ci'] -
-                                  modelloOr[,'GammaStarM'])/(dfReplicate[,'ci'] + 2*modelloOr[,'GammaStarM'])    #[micromol/m2s]
+  
+  ## Dark respiration at growth temperature
+  ftemp_inst_rd <- ftemp_inst_rd(DF$tc_opt)
+  rd_unitiabs  <- rd_to_vcmax * (ftemp_inst_rd / ftemp25_inst_vcmax) * out_lue_vcmax$vcmax_unitiabs
+  
+  # Gross Primary Productivity
+  gpp <- DF$ppfd * DF$fapar * out_lue_vcmax$lue   # in g C m-2 s-1
+  
+  ## Dark respiration
+  rd <- DF$ppfd * DF$fapar * rd_unitiabs
+  
+  # Assimilation is not returned because it should not be confused with what 
+  # is usually measured should use instantaneous assimilation for comparison to
+  # measurements. This is returned by inst_rpmodel().
+  assim <- ifelse(a_j < a_c , a_j, a_c)
+  assim_eq_check <- all.equal(assim, gpp/c_molmass, tol = 0.001)
+  if (! isTRUE(assim_eq_check)) {
+    warning("rpmodel_subdaily(): Assimilation and GPP are not identical.\n",
+            assim_eq_check)
   }
   
-  # Rename Ac, AJ and save variables in a df.
-  dfReplicate[,'Ac1Opt'] = Ac
-  dfReplicate[,'AJp1Opt'] = AJ
-  rm(Ac, AJ, phi0)
+  ## average stomatal conductance
+  gs <- assim/(DF$ca - DF$ci_inst)
   
-  out = dfReplicate[,c(
-    'Ac1Opt','AJp1Opt','caOpt','ci','ciOpt','CO2Opt',
-    'GammaStarOpt','IabsOpt','J','JmaxOpt',
-    'JmaxAdjusted','KOpt','TempOpt','vcmaxAdjusted',
-    'vcmaxOpt','VPDOpt',
-    'xiPa')]
+  #calc a_cost
+  e <- 1.6*gs*DF$vpd
+  p_leaf <- get_p(psi_soil,e,K,d,c,h,par_env$density_water)
+  # a_cost <- resp/(e_crit-e)
   
-  # COMPUTE GPPp as minimum value between Ac and AJ ----
-  out$GPPpOpt = NA
-  
-  cat(sprintf('Calculate GPPpOpt, please wait ....\n'))
-  for ( cy1 in seq(1,nrow(out)) ) {
-    tmp = c(out[,'Ac1Opt'][cy1],out[,'AJp1Opt' ][cy1])
-    posNa = which(is.na(tmp) == 1)
-    if ( length(posNa) > 0 ) tmp = tmp[-1*posNa]
-    rm(posNa)
-    if (length(tmp) == 2 )
-      out[,'GPPpOpt'][cy1] = min(tmp)
-  }
-  rm(cy1,tmp)
-  
-  cat(sprintf('Calculate GPPpOpt .... OK\n'))
-  
-  # CREATE and SAVE a data.frame with model outputs ----
-  
-  dataOr = cbind(modelloOr,out)
+  ## construct list for output
+  out <- list(
+    gpp             = gpp,   # remove this again later
+    ca              = DF$ca,
+    gammastar       = DF$gammastar,
+    kmm             = DF$kmm,
+    a_cost          = a_cost,
+    chi             = out_optchi$chi,
+    xi              = out_optchi$xi,
+    mj              = out_optchi$mj,
+    mc              = out_optchi$mc,
+    ci              = DF$ci_inst,
+    iwue            = iwue,
+    gs              = gs,
+    e               = e,
+    vcmax           = DF$vcmaxAdjusted,
+    jmax            = DF$jmaxAdjusted,
+    rd              = rd
+  )
+  return(out)
+  # dataOr = cbind(modelloOr,out)
 }
 
 
@@ -514,7 +570,7 @@ dailyUpscaling <- function(df = dfIn, nrWindow = 1, hour_reference_T = 12,
                              upscaling_method = "noon") {
   
   #1.0 Header control
-  if(is.character(upscaling_method)){
+  if(!is.character(upscaling_method)){
     stop(
       cat('The upscaling_method should be a character string either "noon", "daily" or "max_rad".')
     )
@@ -524,14 +580,15 @@ dailyUpscaling <- function(df = dfIn, nrWindow = 1, hour_reference_T = 12,
       )
   }
   
-  colMandatory = c('YEAR','MONTH','DAY','HOUR','MINUTE','NIGHT','TIMESTAMP_START')
+  colMandatory = c('YEAR','MONTH','DAY','HOUR','MINUTE', 'TIMESTAMP')
   if (upscaling_method == "max_rad")
     colMandatory = c(colMandatory,"sw_in")
   
-  if ( headerControl_dd(df = df, colMandatory = colMandatory))
+  if (!headerControl_dd(df = df, colMandatory = colMandatory))
     stop(headerControl_dd(df = df, colMandatory = colMandatory, showMsg = TRUE))
   
   #2.0 T calculation
+  df <- df %>% as.data.frame()
   dfDayT = df[1,]    
   
   
@@ -547,21 +604,20 @@ dailyUpscaling <- function(df = dfIn, nrWindow = 1, hour_reference_T = 12,
           # upscaling_method noon
           if (upscaling_method == "noon") {
             posReference = which(df$YEAR == cicloAnno & df$MONTH == cicloMesi & df$DAY == cicloGiorni &
-                                   df$NIGHT == 0 & df$HOUR == hourReference & df$MINUTE == 0)
+                                   df$HOUR == hourReference & df$MINUTE == 0)
             if (length(posReference) == 0) next
             windowDay = seq(posReference - nrWindow,posReference + nrWindow)
           }
           # upscaling_method daily
           if (upscaling_method == "daily") {
             posReference = which(df$YEAR == cicloAnno & df$MONTH == cicloMesi & df$DAY == cicloGiorni &
-                                   df$NIGHT == 0 & df$HOUR == 12 & df$MINUTE == 0)
-            windowDay = which(df$YEAR == cicloAnno & df$MONTH == cicloMesi & df$DAY == cicloGiorni &
-                                df$NIGHT == 0)
+                                   df$HOUR == 12 & df$MINUTE == 0)
+            windowDay = which(df$YEAR == cicloAnno & df$MONTH == cicloMesi & df$DAY == cicloGiorni)
           }
           # upscaling_method max_rad
           if (upscaling_method == "max_rad") {
             posReferenceMax = which(df$YEAR == cicloAnno & df$MONTH == cicloMesi & df$DAY == cicloGiorni &
-                                      df$NIGHT == 0 & is.na(df$SWINPOT) == 0)
+                                      is.na(df$SWINPOT) == 0)
             if ( length(posReferenceMax) > 0 ) {
               
               posMaxSWINPOT = which(df$SWINPOT[posReferenceMax] == max(df$SWINPOT[posReferenceMax],na.rm = T)[1])
@@ -570,7 +626,7 @@ dailyUpscaling <- function(df = dfIn, nrWindow = 1, hour_reference_T = 12,
               windowDay = seq(posReference - nrWindow,posReference + nrWindow)
             } else {
               posReference = which(df$YEAR == cicloAnno & df$MONTH == cicloMesi & df$DAY == cicloGiorni &
-                                     df$NIGHT == 0 & df$HOUR == 12 & df$MINUTE == 0)
+                                     df$HOUR == 12 & df$MINUTE == 0)
               windowDay = NA
             }
           }
@@ -578,29 +634,42 @@ dailyUpscaling <- function(df = dfIn, nrWindow = 1, hour_reference_T = 12,
           
           dfDay = df[1,]
           for (col in colnames(df)) {
-            if ( is.na(sum(windowDay)) ) {
-              dfDay[1,col] = NA  
-              next
-            }
-            tmp = df[windowDay,col]
-            if (!is.numeric(tmp) ) {
-              dfDay[1,col] = NA
-              next
-            }
             
-            posNa = which(is.na(tmp) == 1)
-            if (length(posNa) > 0) tmp = tmp[-1*posNa]
-            if (length(tmp) == 0) {
-              dfDay[1,col] = NA
-            } else {
-              dfDay[1,col] = mean(tmp)
-            }
-            rm(tmp,posNa)
+            if(col != 'TIMESTAMP'){
+              
+              if (is.na(sum(windowDay)) ) {
+                dfDay[1,col] = NA  
+                next
+              }
+            
+              tmp = df[windowDay,col]
+              if (!is.numeric(tmp)) {
+                dfDay[1,col] = NA
+                next
+              }
+            
+              
+              posNa = which(is.na(tmp) == TRUE)
+            
+              if (length(posNa) > 0){
+                tmp = tmp[-1*posNa]
+                }
+            
+              if (length(tmp) == 0){
+                dfDay[1,col] = NA
+              } else {
+                dfDay[1,col] = mean(tmp)
+              }
+              rm(tmp,posNa)
+            }else{next}
           }
-          rm(col)
-          dfDay$TIMESTAMP_START = df$TIMESTAMP_START[posReference]
-          dfDayT = rbind(dfDayT,dfDay)     
+          
+          dfDay$TIMESTAMP = df$TIMESTAMP[posReference]
+          
+          dfDayT = rbind(dfDayT,dfDay)  
+          
           rm(dfDay,windowDay,posReference)
+          
           if (upscaling_method == "daily") break;
           if (upscaling_method == "max_rad") break;
         }
@@ -609,13 +678,7 @@ dailyUpscaling <- function(df = dfIn, nrWindow = 1, hour_reference_T = 12,
   }
   dfDayT = dfDayT[-1,]
   
-  dfDayT$YEAR = year(ymd_hm(as.character(dfDayT$TIMESTAMP_START)))
-  dfDayT$MONTH = month(ymd_hm(as.character(dfDayT$TIMESTAMP_START)))
-  dfDayT$DAY = day(ymd_hm(as.character(dfDayT$TIMESTAMP_START)))
-  dfDayT$HOUR = hour(ymd_hm(as.character(dfDayT$TIMESTAMP_START)))
-  dfDayT$MINUTE = minute(ymd_hm(as.character(dfDayT$TIMESTAMP_START)))
-  
-  dfDayT = dfDayT[order(dfDayT$TIMESTAMP_START),]
+  dfDayT = dfDayT[order(dfDayT$TIMESTAMP),]
   
   return(dfDayT)
 }
@@ -721,7 +784,7 @@ runningMean <- function(data_x_running_mean_t = df, daily_window = 10) {
         rm(data_1)
       }
       rm(ciclo_variabili)
-      media_1$TIMESTAMP_START = data_x_running_mean$TIMESTAMP_START[ciclo_inizio_mm]
+      media_1$TIMESTAMP = data_x_running_mean$TIMESTAMP[ciclo_inizio_mm]
       data_running_mean = rbind(data_running_mean,media_1)
       rm(media_1)
       rm(posizioni_rm)
@@ -734,14 +797,14 @@ runningMean <- function(data_x_running_mean_t = df, daily_window = 10) {
   
   data_running_mean_t = data_running_mean_t[-1,]
   
-  library(lubridate)
-  data_running_mean_t$YEAR = year(ymd_hm(as.character(data_running_mean_t$TIMESTAMP_START)))
-  data_running_mean_t$MONTH = month(ymd_hm(as.character(data_running_mean_t$TIMESTAMP_START)))
-  data_running_mean_t$DAY = day(ymd_hm(as.character(data_running_mean_t$TIMESTAMP_START)))
-  data_running_mean_t$HOUR = hour(ymd_hm(as.character(data_running_mean_t$TIMESTAMP_START)))
-  data_running_mean_t$MINUTE = minute(ymd_hm(as.character(data_running_mean_t$TIMESTAMP_START)))
+  # library(lubridate)
+  # data_running_mean_t$YEAR = year(ymd_hm(as.character(data_running_mean_t$TIMESTAMP)))
+  # data_running_mean_t$MONTH = month(ymd_hm(as.character(data_running_mean_t$TIMESTAMP)))
+  # data_running_mean_t$DAY = day(ymd_hm(as.character(data_running_mean_t$TIMESTAMP)))
+  # data_running_mean_t$HOUR = hour(ymd_hm(as.character(data_running_mean_t$TIMESTAMP)))
+  # data_running_mean_t$MINUTE = minute(ymd_hm(as.character(data_running_mean_t$TIMESTAMP)))
   
-  data_running_mean_t = data_running_mean_t[order(data_running_mean_t$TIMESTAMP_START),]
+  data_running_mean_t = data_running_mean_t[order(data_running_mean_t$TIMESTAMP),]
   
   return(data_running_mean_t)
 }
@@ -761,77 +824,77 @@ runningMean <- function(data_x_running_mean_t = df, daily_window = 10) {
 # return: a vector with required inputs for pmodelPlus
 # rdname: gapFilling
 
-gapFilling = function(v = vettore,v_name = NA,
-                      vYear = vYear, vMonth = vMonth, vDay = vDay,
-                      vHour = vHour, vMinute = vMinute, showMsg = F,
-                      approccio = 'constant') {
-  
-  # check if there are values in v 
-  if ( sum(is.na(v)) == length(v) ) {
-    warning('variable not gap filled\n') 
-    return(v)
-  }
-  str_msg = ''
-  if (!is.na(v_name))
-    str_msg = paste0(str_msg,sprintf('GAP FILLING variable: %s\n',v_name))
-  
-  str_msg = paste0(str_msg,
-                   sprintf('approach: %s\nmissing value%s: %s\n',
-                           approccio,
-                           ifelse(sum(is.na(v)) == 1,'','s'),sum(is.na(v))))
-  
-  if (showMsg)
-    cat(str_msg)
-  
-  if (approccio == 'constant') {
-    # 
-    # for (cyr in seq(2,length(v))) {
-    # 
-    #   if (is.na(v[cyr]))
-    #     v[cyr] = v[cyr-1]
-    # }
-    # rm(cyr)
-    posValori = which(is.na(v) == 0)
-    for (contaV in posValori) {
-      
-      yearToUse  = vYear[contaV]
-      monthToUse = vMonth[contaV]
-      dayToUse   = vDay[contaV]
-      vToUse = v[contaV]
-      
-      posToUse = which(
-        vYear == yearToUse &
-          vMonth == monthToUse &
-          vDay == dayToUse)
-      
-      if ( length(posToUse) > 0 )
-        v[posToUse] = vToUse
-      
-      rm(yearToUse,monthToUse,dayToUse)
-      rm(vToUse,posToUse)
-    }
-    rm(contaV)
-  }
-  #approccio: 'linear' 
-  if (approccio == 'linear') {
-    posValori = which(is.na(v) == 0)
-    for (contaV in seq(2,length(posValori))) {
-      # slope computetation 
-      x1 = posValori[contaV - 1]
-      x2 = posValori[contaV]
-      y1 = v[x1]
-      y2 = v[x2]
-      slope = (y2 - y1) / (x2-x1)
-      intercept = y1 - (slope*x1)
-      itp = (slope * seq(x1,x2)) + intercept
-      v[seq(x1,x2)] = itp
-    }
-  }
-  
-  if (showMsg)
-    cat(sprintf('GAP FILLING COMPLETED\nmissing value%s:%d\n',
-                ifelse(sum(is.na(v)) == 1,'','s'),sum(is.na(v))))
-  
-  return(v)
-  
-}
+# gapFilling = function(v = vettore,v_name = NA,
+#                       vYear = vYear, vMonth = vMonth, vDay = vDay,
+#                       vHour = vHour, vMinute = vMinute, showMsg = F,
+#                       approccio = 'constant') {
+#   
+#   # check if there are values in v 
+#   if ( sum(is.na(v)) == length(v) ) {
+#     warning('variable not gap filled\n') 
+#     return(v)
+#   }
+#   str_msg = ''
+#   if (!is.na(v_name))
+#     str_msg = paste0(str_msg,sprintf('GAP FILLING variable: %s\n',v_name))
+#   
+#   str_msg = paste0(str_msg,
+#                    sprintf('approach: %s\nmissing value%s: %s\n',
+#                            approccio,
+#                            ifelse(sum(is.na(v)) == 1,'','s'),sum(is.na(v))))
+#   
+#   if (showMsg)
+#     cat(str_msg)
+#   
+#   if (approccio == 'constant') {
+#     # 
+#     # for (cyr in seq(2,length(v))) {
+#     # 
+#     #   if (is.na(v[cyr]))
+#     #     v[cyr] = v[cyr-1]
+#     # }
+#     # rm(cyr)
+#     posValori = which(is.na(v) == 0)
+#     for (contaV in posValori) {
+#       
+#       yearToUse  = vYear[contaV]
+#       monthToUse = vMonth[contaV]
+#       dayToUse   = vDay[contaV]
+#       vToUse = v[contaV]
+#       
+#       posToUse = which(
+#         vYear == yearToUse &
+#           vMonth == monthToUse &
+#           vDay == dayToUse)
+#       
+#       if ( length(posToUse) > 0 )
+#         v[posToUse] = vToUse
+#       
+#       rm(yearToUse,monthToUse,dayToUse)
+#       rm(vToUse,posToUse)
+#     }
+#     rm(contaV)
+#   }
+#   #approccio: 'linear' 
+#   if (approccio == 'linear') {
+#     posValori = which(is.na(v) == 0)
+#     for (contaV in seq(2,length(posValori))) {
+#       # slope computetation 
+#       x1 = posValori[contaV - 1]
+#       x2 = posValori[contaV]
+#       y1 = v[x1]
+#       y2 = v[x2]
+#       slope = (y2 - y1) / (x2-x1)
+#       intercept = y1 - (slope*x1)
+#       itp = (slope * seq(x1,x2)) + intercept
+#       v[seq(x1,x2)] = itp
+#     }
+#   }
+#   
+#   if (showMsg)
+#     cat(sprintf('GAP FILLING COMPLETED\nmissing value%s:%d\n',
+#                 ifelse(sum(is.na(v)) == 1,'','s'),sum(is.na(v))))
+#   
+#   return(v)
+#   
+# }
