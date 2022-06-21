@@ -385,7 +385,7 @@ rpmodel_subdaily <- function(
     # OPTIMAL Vcmax
     DF$vcmax_opt  = phi0 * DF$ppfd_opt*DF$fapar_opt *
       ((DF$ci + DF$kmm_opt) / (DF$ci + 2*DF$gammastar_opt)) *
-      sqrt(1 - (c*(DF$ci + 2*DF$gammastar_opt)/(DF$ci - DF$gammastar_opt))^(2/3))                                        # [micromol/m2s]
+      sqrt(1 - (c_cost*(DF$ci + 2*DF$gammastar_opt)/(DF$ci - DF$gammastar_opt))^(2/3))                                        # [micromol/m2s]
     
     # OPTIMAL Jmax
     DF$jmax_opt  = (4 * phi0 * DF$ppfd_opt*DF$fapar_opt) / 
@@ -418,10 +418,10 @@ rpmodel_subdaily <- function(
   
   # CALCULATE the assimilation rate: Ac
   # acclimated Ac with the acclimated xiPa term
-  A_c = DF$vcmaxAdjusted*(DF$ci_inst - DF$gammastar)/(DF$ci_inst + DF$kmm)                                             #[micromol/m2s]
+  a_c = DF$vcmaxAdjusted*(DF$ci_inst - DF$gammastar)/(DF$ci_inst + DF$kmm)                                             #[micromol/m2s]
 
   # acclimated AJ with the acclimated xiPa term
-  A_j = kphio * DF$fapar*DF$ppfd * (DF$ci - DF$gammastar)/(DF$ci + 2.0 * DF$gammastar) * DF$jmaxAdjusted    #[micromol/m2s]
+  a_j = kphio * DF$fapar*DF$ppfd * (DF$ci - DF$gammastar)/(DF$ci + 2.0 * DF$gammastar) * DF$jmaxAdjusted    #[micromol/m2s]
 
   
   if(c4){
