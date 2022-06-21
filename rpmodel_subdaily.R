@@ -385,7 +385,7 @@ rpmodel_subdaily <- function(
     # OPTIMAL Vcmax
     DF$vcmax_opt  = phi0 * DF$ppfd_opt*DF$fapar_opt *
       ((DF$ci + DF$kmm_opt) / (DF$ci + 2*DF$gammastar_opt)) *
-      sqrt(1 - (c_cost*(DF$ci + 2*DF$gammastar_opt)/(DF$ci - DF$gammastar_opt))^(2/3))                                        # [micromol/m2s]
+      sqrt(1 - (c_cost*(DF$ci + 2*DF$gammastar_opt)/(DF$ci - DF$gammastar_opt))^(2/3)) #[umol m-2 s-1]
     
     # OPTIMAL Jmax
     DF$jmax_opt  = (4 * phi0 * DF$ppfd_opt*DF$fapar_opt) / 
