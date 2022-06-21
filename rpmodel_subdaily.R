@@ -350,7 +350,7 @@ rpmodel_subdaily <- function(
               by = "TIMESTAMP")
   
   
-  # GAP- FILLING
+  # 5.1 GAP- FILLING
   DF <- lapply(DF, function(y) {
     if (is.numeric(x)) { 
       approx(as.numeric(DF$TIMESTAMP), y, method = gap_method, 
@@ -361,8 +361,8 @@ rpmodel_subdaily <- function(
     }
     ) %>% bind_cols()
   
-  # OPTIMAL Vcmax and Jmax----
-  # Vcmax with acclimated 'xiPa', 'ci' and 'phi0' (ON)
+  # 5.2 OPTIMAL Vcmax and Jmax----
+  # 5.2.1 Vcmax with acclimated 'xiPa', 'ci' and 'phi0' (ON)
   if (xi_acclimated == 'off') {
     cat(sprintf('vcmax_opt and jmax_opt from upscaling\n'))
     DF[,'ci'] = NA
@@ -372,10 +372,10 @@ rpmodel_subdaily <- function(
     cat(sprintf('vcmax_opt and jmax_opt calculated\n'))
     
     # Intrinsic quantum efficiency of photosynthesis (phi0)
-    phi0 = (1/8) *(0.352 + 0.022*DF$tc_opt - 0.00034*DF$tc_opt^(2))       # Temperature dependence function of phi0 (Bernacchi et al.,2003)
+    phi0 = (1/8) *(0.352 + 0.022*DF$tc_opt - 0.00034*DF$tc_opt^(2)) # Temperature dependence function of phi0 (Bernacchi et al.,2003)
 
     # acclimated xiPa (parameter that determines the sensitivity of ci/ca to VPD)
-    DF$xiPa = sqrt((beta*(DF$kmm_opt + DF$gammastar_opt))/(1.6*DF$ns_star_opt))                      # [Pa^1/2]
+    DF$xiPa = sqrt((beta*(DF$kmm_opt + DF$gammastar_opt))/(1.6*DF$ns_star_opt)) # [Pa^1/2]
     
     # acclimated ci (with acclimated xiPa, and adjusted with the actual VPD)
     DF$ci = (DF$xiPa * DF$ca_opt + DF$gammastar_opt*sqrt(DF$vpd))/
@@ -390,18 +390,18 @@ rpmodel_subdaily <- function(
     # OPTIMAL Jmax
     DF$jmax_opt  = (4 * phi0 * DF$ppfd_opt*DF$fapar_opt) / 
       sqrt(1/(1 - (c_cost*( DF$ci + 2*DF$gammastar_opt)/
-                     (DF$ci - DF$gammastar_opt))^(2.0/3.0)) - 1)           #[micromol/m2s]
+                     (DF$ci - DF$gammastar_opt))^(2.0/3.0)) - 1) #[umol m-2 s-1]
   }
   
-  # Optimal and actual temperature conversion to Kelvin
-  DF$tk_opt = DF$tc_opt + 273.15                               # [K]   
-  DF$tk = DF$tc + 273.15                                        # [K]
+  # 5.2.2 Optimal and actual temperature conversion to Kelvin
+  DF$tk_opt = DF$tc_opt + 273.15 # [K]   
+  DF$tk = DF$tc + 273.15 # [K]
   
-  # INSTANTANEOUS Vcmax and Jmax----
+  # 5.2.3 INSTANTANEOUS Vcmax and Jmax----
   # The Arrhenius equation constants:
-  Ha = 65330                       # J mol-1 
+  Ha = 65330# [J mol-1]
   Haj = 43900
-  Rgas = 8.314                     # J/mol*K
+  Rgas = 8.314 # [J mol-1 K-1]
   
   
   DF$vcmaxAdjusted = DF$vcmax_opt * exp((Ha/Rgas)*(1/DF$tk_opt - 1/DF$tk))
@@ -410,13 +410,13 @@ rpmodel_subdaily <- function(
   rm(Rgas,Ha,Haj)
   
   
-  # instantaneous ci (with acclimated xiPa, and adjusted with the actual VPD)
+  # 5.3 instantaneous ci (with acclimated xiPa, and adjusted with the actual VPD)
   DF$ci_inst = (DF$xiPa * DF$ca + DF$gammastar*sqrt(DF$vpd))/(DF$xiPa + sqrt(DF$vpd))
 
-  # instantaneous chi
+  # 5.4 instantaneous chi
   DF$chi_inst = DF$ci_inst/DF$ca 
 
-  
+  # 5.5 Opt chi output
   if(c4){
     out_optchi <- list(
       xi = DF$xiPa,
@@ -452,12 +452,12 @@ rpmodel_subdaily <- function(
   }
   
   
-  #---- Corrolary preditions ---------------------------------------------------
-  ## intrinsic water use efficiency (in Pa)
+  # ---- Corrolary preditions ---------------------------------------------------
+  # 6.0 intrinsic water use efficiency (in Pa)
   iwue = (DF$ca - DF$ci_inst)/1.6
   
   #---- Vcmax and light use efficiency -----------------------------------------
-  # Jmax limitation comes in only at this step
+  # 7.0 Jmax limitation comes in only at this step
   if (c4){
     out_lue_vcmax <- lue_vcmax_c4(
       kphio,
@@ -500,7 +500,7 @@ rpmodel_subdaily <- function(
   }
   
   
-  # CALCULATE the assimilation rate
+  # 8.0 CALCULATE the assimilation rate
   # acclimated Ac with the acclimated xiPa term
   a_c = DF$vcmaxAdjusted * out_optchi$mc  #[umol m-2 s-1]
   
@@ -510,21 +510,19 @@ rpmodel_subdaily <- function(
   
 
   #---- Corrolary preditions ---------------------------------------------------
-  # Vcmax25 (vcmax normalized to 25 deg C)
+  # 9.0 Vcmax25 (vcmax normalized to 25 deg C)
   ftemp25_inst_vcmax  <- ftemp_inst_vcmax( DF$tc, DF$tc_opt, tcref = 25.0 )
   vcmax25_unitiabs  <- out_lue_vcmax$vcmax_unitiabs / ftemp25_inst_vcmax
   
   
-  ## Dark respiration at growth temperature
+  ## 10.0  Dark respiration at growth temperature
   ftemp_inst_rd <- ftemp_inst_rd(DF$tc_opt)
   rd_unitiabs  <- rd_to_vcmax * (ftemp_inst_rd / ftemp25_inst_vcmax) * out_lue_vcmax$vcmax_unitiabs
   
   ## Dark respiration
   rd <- DF$ppfd * DF$fapar * rd_unitiabs
   
-  # Assimilation is not returned because it should not be confused with what 
-  # is usually measured should use instantaneous assimilation for comparison to
-  # measurements. This is returned by inst_rpmodel().
+  # 11.0 Assimilation
   assim <- ifelse(a_j < a_c , a_j, a_c)
   # assim_eq_check <- all.equal(assim, gpp/c_molmass, tol = 0.001)
   # if (! isTRUE(assim_eq_check)) {
@@ -534,11 +532,11 @@ rpmodel_subdaily <- function(
   # Gross Primary Productivity
   gpp <- assim * c_molmass  # in ug C m-2 s-1
   
-  ## average stomatal conductance
+  ## 12.0  average stomatal conductance
   gs <- assim/(DF$ca - DF$ci_inst)
   e <- 1.6*gs*DF$vpd
   
-  ## construct list for output
+  ## 13.0 construct list for output
   out <- list(
     gpp             = gpp,   # remove this again later
     assim           = assim,
@@ -557,8 +555,9 @@ rpmodel_subdaily <- function(
     jmax            = DF$jmaxAdjusted,
     rd              = rd
   )
+  
   return(out)
-  # dataOr = cbind(modelloOr,out)
+
 }
 
 
