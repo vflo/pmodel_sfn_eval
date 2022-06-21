@@ -350,7 +350,7 @@ rpmodel_subdaily <- function(
               by = "TIMESTAMP")
   
   
-  #### GAP- FILLING
+  # GAP- FILLING
   DF <- lapply(DF, function(y) {
     if (is.numeric(x)) { 
       approx(as.numeric(DF$TIMESTAMP), y, method = gap_method, 
@@ -378,8 +378,8 @@ rpmodel_subdaily <- function(
     DF$xiPa = sqrt((beta*(DF$kmm_opt + DF$gammastar_opt))/(1.6*DF$ns_star_opt))                      # [Pa^1/2]
     
     # acclimated ci (with acclimated xiPa, and adjusted with the actual VPD)
-    DF$ci = (DF$xiPa * DF$ca_opt + DF$gammastar_opt*sqrt(DF$vpd))/(
-                               DF$xiPa + sqrt(DF$vpd))
+    DF$ci = (DF$xiPa * DF$ca_opt + DF$gammastar_opt*sqrt(DF$vpd))/
+      (DF$xiPa + sqrt(DF$vpd))
     
     
     # OPTIMAL Vcmax
@@ -415,13 +415,6 @@ rpmodel_subdaily <- function(
 
   # instantaneous chi
   DF$chi_inst = DF$ci_inst/DF$ca 
-  
-  # CALCULATE the assimilation rate: Ac
-  # acclimated Ac with the acclimated xiPa term
-  a_c = DF$vcmaxAdjusted*(DF$ci_inst - DF$gammastar)/(DF$ci_inst + DF$kmm)                                             #[micromol/m2s]
-
-  # acclimated AJ with the acclimated xiPa term
-  a_j = kphio * DF$fapar*DF$ppfd * (DF$ci - DF$gammastar)/(DF$ci + 2.0 * DF$gammastar) * DF$jmaxAdjusted    #[micromol/m2s]
 
   
   if(c4){
@@ -434,19 +427,18 @@ rpmodel_subdaily <- function(
     )    
     
   } else {
-    
     ## alternative variables
     gamma <- DF$gammastar / DF$ca
     kappa <- DF$kmm / DF$ca
     
     ## use chi for calculating mj
-    mj <- (DF$chi_inst - gamma) / (DF$chi_inst + 2.0 * gamma)
+    mj <- (DF$chi_inst - gamma)/(DF$chi_inst + kappa) 
     
     ## mc
-    mc <- (DF$chi_inst - gamma) / (DF$chi_inst + kappa)
+    mc <- (DF$chi_inst - gamma) / (DF$chi_inst +  kappa)
     
     ## mj:mv
-    mjoc <- (DF$chi_inst + kappa) / (DF$chi_inst + 2.0 * gamma)
+    mjoc <- (DF$chi_inst +  kappa) / (DF$chi_inst + 2.0 * gamma)
     
     # format output list
     out_optchi <- list(
@@ -458,6 +450,7 @@ rpmodel_subdaily <- function(
     )
     
   }
+  
   
   #---- Corrolary preditions ---------------------------------------------------
   ## intrinsic water use efficiency (in Pa)
@@ -506,6 +499,16 @@ rpmodel_subdaily <- function(
     
   }
   
+  
+  # CALCULATE the assimilation rate
+  # acclimated Ac with the acclimated xiPa term
+  a_c = DF$vcmaxAdjusted * out_optchi$mc  #[umol m-2 s-1]
+  
+  # acclimated AJ with the acclimated xiPa term
+  a_j = kphio * DF$fapar*DF$ppfd * out_optchi$mj * DF$jmaxAdjusted  #[umol m-2 s-1]
+  
+  
+
   #---- Corrolary preditions ---------------------------------------------------
   # Vcmax25 (vcmax normalized to 25 deg C)
   ftemp25_inst_vcmax  <- ftemp_inst_vcmax( DF$tc, DF$tc_opt, tcref = 25.0 )
@@ -516,9 +519,6 @@ rpmodel_subdaily <- function(
   ftemp_inst_rd <- ftemp_inst_rd(DF$tc_opt)
   rd_unitiabs  <- rd_to_vcmax * (ftemp_inst_rd / ftemp25_inst_vcmax) * out_lue_vcmax$vcmax_unitiabs
   
-  # Gross Primary Productivity
-  gpp <- DF$ppfd * DF$fapar * out_lue_vcmax$lue   # in g C m-2 s-1
-  
   ## Dark respiration
   rd <- DF$ppfd * DF$fapar * rd_unitiabs
   
@@ -526,27 +526,25 @@ rpmodel_subdaily <- function(
   # is usually measured should use instantaneous assimilation for comparison to
   # measurements. This is returned by inst_rpmodel().
   assim <- ifelse(a_j < a_c , a_j, a_c)
-  assim_eq_check <- all.equal(assim, gpp/c_molmass, tol = 0.001)
-  if (! isTRUE(assim_eq_check)) {
-    warning("rpmodel_subdaily(): Assimilation and GPP are not identical.\n",
-            assim_eq_check)
-  }
+  # assim_eq_check <- all.equal(assim, gpp/c_molmass, tol = 0.001)
+  # if (! isTRUE(assim_eq_check)) {
+  #   warning("rpmodel_subdaily(): Assimilation and GPP are not identical.\n",
+  #           assim_eq_check)
+  # }
+  # Gross Primary Productivity
+  gpp <- assim * c_molmass  # in ug C m-2 s-1
   
   ## average stomatal conductance
   gs <- assim/(DF$ca - DF$ci_inst)
-  
-  #calc a_cost
   e <- 1.6*gs*DF$vpd
-  p_leaf <- get_p(psi_soil,e,K,d,c,h,par_env$density_water)
-  # a_cost <- resp/(e_crit-e)
   
   ## construct list for output
   out <- list(
     gpp             = gpp,   # remove this again later
+    assim           = assim,
     ca              = DF$ca,
     gammastar       = DF$gammastar,
     kmm             = DF$kmm,
-    a_cost          = a_cost,
     chi             = out_optchi$chi,
     xi              = out_optchi$xi,
     mj              = out_optchi$mj,
