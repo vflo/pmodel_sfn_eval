@@ -1,15 +1,33 @@
 source("init_PREPARE_DATA_LIST_HOURLY.R")
+# 
+# faulty <- !paste0(as.list(flx_files$sfn_sites),".RData") %in% 
+#   list.files("DATA/PREPARED_DATA_LIST_HOURLY/")
 
 #### MODEL CALCULATION ####
 as.list(flx_files$sfn_sites) %>%
   furrr::future_map(function(x){
     #load SAPFLUXNET site and aggregation at daily level
-    library(sapfluxnetr)
     sfn <- read_sfn_data(x, folder = path) %>%
       sfn_metrics(period = "1 hour", .funs = list(~ mean(., na.rm = TRUE)),
                   solar = TRUE, interval = "general") %>%
       sapfluxnetr::metrics_tidyfier(metadata = sfn_meta, interval = "general")
     
+    tzone <- sapfluxnetr::get_timezone(read_sfn_data(x, folder = path))
+    
+    if(x %in% c("CAN_TUR_P39_POS","CAN_TUR_P39_PRE","CAN_TUR_P74")){
+      tzone <-  'America/Toronto'
+    }
+    if(x %in% c("FRA_HES_HE1_NON","FRA_HES_HE2_NON","ESP_CAN",
+                "ESP_TIL_MIX","ESP_TIL_OAK","ESP_TIL_PIN",
+                "ESP_VAL_BAR","ESP_VAL_SOR")){
+      tzone <-  "Etc/GMT-1"
+    }
+    if(x %in% c("PRT_MIT","PRT_LEZ_ARN","ESP_LAS","GBR_ABE_PLO","GBR_DEV_DRO","GBR_DEV_CON",
+                "GBR_GUI_ST1", "GBR_GUI_ST3","GBR_GUI_ST2","SEN_SOU_IRR","SEN_SOU_POS",
+                "SEN_SOU_PRE")){
+      tzone <-  "Etc/GMT"
+    }
+
     if (!is.na(sfn$st_soil_depth %>% unique())){sensors_d = sfn$st_soil_depth %>% unique()} else {sensors_d = 0.5}
     #load FLUXNET and extract simplified variables if there is EC and SFN overlap
     
@@ -105,10 +123,14 @@ as.list(flx_files$sfn_sites) %>%
              st_soil_depth = case_when(is.na(st_soil_depth)~ depth*100,
                                       !is.na(st_soil_depth)~ st_soil_depth))
     
-    #join SW ERA5
+    #join SW ERA54
+    load(paste0("DATA/SW_IN_ERA5_HOURLY_SITE/",x,".RData"))
     sfn <- sfn %>% 
-      left_join(sw_ERA5,by = c("si_code", "TIMESTAMP_daylight")) %>% 
-      mutate(sw_ERA5 = sw_ERA5_18/2) # transform into mean daily value (divide by two to account for night value)
+      mutate(TIMESTAMP = force_tz(TIMESTAMP,tzone))%>% 
+      left_join(sw_ERA5 %>% 
+                  dplyr::select(si_code,TIMESTAMP,SW_in_ERA5) %>% 
+                  mutate(TIMESTAMP = with_tz(TIMESTAMP,tzone)),
+                by = c("si_code", "TIMESTAMP"))
     
     #join elevation and set it if NA
     sfn <- sfn %>% 
@@ -161,3 +183,4 @@ as.list(flx_files$sfn_sites) %>%
     save(sfn_list, file = paste0("DATA/PREPARED_DATA_LIST_HOURLY/",x,".RData"))
     
   })
+<- 

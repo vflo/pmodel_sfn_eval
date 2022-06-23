@@ -14,7 +14,7 @@ library(qgam)
 library(GauPro)
 source("dist_merge.R")
 library(furrr)
-plan('multisession', workers = 8)
+plan('multisession', workers = 4)
 options('future.global.maxsize'=2*1024*1024^2)
 
 sapply(list('calc_sfn_aggr_E.R','calc_sfn_aggr_env.R','calc_sfn_scale.R',
@@ -57,11 +57,9 @@ flx_files <- read_csv("DATA/flx_files.csv")
 load("DATA/PSI_DF.RData")
 PSI_DF <- as_tibble(PSI_DF)
 
-#load SW ERA5
-load("DATA/sw_ERA5_18.RData")
-sw_ERA5 <- as_tibble(sw_ERA5_18)
-# load("DATA/SW_IN_ERA5_HOURLY.RData")
-# sw_ERA5 <- as_tibble(sw_ERA5_18)
+# #load SW ERA5 HOURLY PATH
+# sw_ERA5_path <- "DATA/SW_IN_ERA5_HOURLY_SITE"
+
 
 #load FAPAR
 fapar <-read_csv("DATA/FAPAR_sites.csv")
