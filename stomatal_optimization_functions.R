@@ -1,4 +1,4 @@
-#Some functions are from Jugie Wang code
+#Some functions are from yugie Wang code
 
 ###########################################
 ## PHOTOSYNTHETIC FUNCTIONS
@@ -465,13 +465,13 @@ fn_profit <- function(par, psi_soil, par_cost, e_crit, par_photosynth, par_plant
   dpsi = par[2]       # delta Psi in MPa
   
   gs = calc_gs(dpsi, psi_soil, par_plant, par_env) * par_env$LAI  # gs in mol/m2ground/s
-  E  = 1.6*gs*(par_env$vpd/par_env$patm)*1e6         # E in umol/m2/s
+  # E  = 1.6*gs*(par_env$vpd/par_env$patm)*1e6         # E in umol/m2/s
   
   ## light-limited assimilation
   a_j   <- calc_assim_light_limited(gs, jmax, par_photosynth) # Aj in umol/m2ground/s
   a     = a_j$a
-  ci    = a_j$ci
-  vcmax = calc_vcmax_coordinated_numerical(a,ci, par_photosynth)
+  # ci    = a_j$ci
+  # vcmax = calc_vcmax_coordinated_numerical(a,ci, par_photosynth)
   
   costs = par_cost$alpha * jmax + par_cost$gamma * dpsi^2 #((abs((-dpsi)/par_plant$psi50)))^2  
   
@@ -511,6 +511,51 @@ optimise_stomata_phydro <- function(fn_profit, psi_soil, par_cost, e_crit, par_p
     opt_hypothesis = opt_hypothesis,
     method         = "L-BFGS-B",
     control        = list(maxit = 500, maximize = TRUE, fnscale = 1e4)
+  )
+  
+  out_optim$value <- -out_optim$value
+  
+  if (return_all){
+    out_optim
+  } else {
+    return(out_optim$par)
+  }
+}
+
+
+fn_profit_instantaneous = function(par, jmax, vcmax, psi_soil, par_cost, par_photosynth, par_plant, par_env, gs_approximation = gs_approximation, do_optim=F){
+  dpsi = par
+
+  gs = calc_gs(dpsi, psi_soil, par_plant, par_env)  # gs in mol/m2/s/Mpa
+  A = calc_assimilation_limiting(vcmax, jmax, gs, par_photosynth)$a
+  profit = A - par_cost$gamma * dpsi^2  
+  
+  if (do_optim){
+    return(-profit)
+  } else {
+    return(profit)
+  }
+}
+
+
+optimise_shortterm <- function(fn_profit_inst, jmax, vcmax, psi_soil, par_cost, par_photosynth, par_plant, par_env, gs_approximation = gs_approximation, return_all = FALSE){
+  
+  out_optim <- optimr::optimr(
+    par       = c(dpsi=1),  
+    lower     = c(0.001),
+    upper     = c(20),
+    fn        = fn_profit_inst,
+    psi_soil  = psi_soil,
+    jmax      = jmax,
+    vcmax     = vcmax,
+    par_cost  = par_cost,
+    par_photosynth = par_photosynth,
+    par_plant = par_plant,
+    par_env   = par_env,
+    do_optim  = TRUE,
+    # opt_hypothesis = opt_hypothesis,
+    method    = "L-BFGS-B",
+    control   = list() 
   )
   
   out_optim$value <- -out_optim$value
