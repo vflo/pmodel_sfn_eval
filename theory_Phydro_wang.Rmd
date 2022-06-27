@@ -1,0 +1,82 @@
+---
+title: "The hydraulic P-model"
+author: "Victor Flo"
+date: "`r Sys.Date()`"
+output:
+  html_document: null
+  word_document: default
+  toc: yes
+  pdf_document: default
+toc_depth: 3
+toc_float: yes
+---
+  
+```{r include=FALSE}
+library(dplyr)
+library(purrr)
+library(tidyr)
+library(ggplot2)
+library(gridExtra)
+library(scales)
+#library(rpmodel)
+
+source("../R/QUADP.R")
+
+sources = paste0("../R/", list.files("../R/"))
+sapply(sources, source, .GlobalEnv)
+
+knitr::opts_chunk$set(echo = T)
+
+# Function to read code skipping roxygen documentation lines
+readLines_nodocs <- function(file){
+  a = readLines(file)
+  id = grep("#'", a)
+  a[-id]
+}
+```
+
+
+$$
+F = A_j (1-\frac{E}{E_\mathrm{crit}}) - \alpha J_\mathrm{max} (1-\frac{E}{E_\mathrm{crit}})
+$$
+
+
+$$
+F = g_\mathrm{s}  c_\mathrm{a} (1-\chi) (1-\frac{E}{E_\mathrm{crit}}) - \alpha J_\mathrm{max} (1-\frac{E}{E_\mathrm{crit}})
+$$
+
+$$
+E = K (\psi_\mathrm{s} - \psi_\mathrm{l}) =  K \Delta\psi \;\;\;; \;\;\; \psi_\mathrm{l} = \psi_\mathrm{s}-\Delta\psi
+$$
+
+$$
+E_\mathrm{crit} = K (\psi_\mathrm{s} - \psi_\mathrm{crit})
+$$
+
+$$
+P(\psi) = \frac{1}{2} ^{(\frac{\psi}{\psi_{50}})^b}
+$$
+
+
+$$
+if\; P(\psi) = 0.01 \;  then: \; \psi_{crit} = \psi_{50}(\frac{ln(100)}{ln(2)} )^{(\frac{1}{b})}
+$$
+$$
+(1-\frac{E}{E_\mathrm{crit}}) = 1 - \frac{ K (\psi_\mathrm{s} - \psi_\mathrm{l})}{K (\psi_\mathrm{s} - \psi_\mathrm{crit})} =
+ \frac{ (\psi_\mathrm{l} - \psi_\mathrm{crit})}{ (\psi_\mathrm{s} - \psi_\mathrm{crit})} = 1-\frac{ \Delta\psi}{ (\psi_\mathrm{s} - \psi_\mathrm{crit})}
+$$
+
+
+$$
+F = g_\mathrm{s}  c_\mathrm{a} (1-\chi) ( 1-\frac{ \Delta\psi}{ (\psi_\mathrm{s} - \psi_\mathrm{crit})}) - \alpha J_\mathrm{max} ( 1-\frac{ \Delta\psi}{ (\psi_\mathrm{s} - \psi_\mathrm{crit})})
+$$
+
+$$
+\frac{\partial F}{\partial \chi} = -g_s c_a( 1-\frac{ \Delta\psi}{ (\psi_\mathrm{s} - \psi_\mathrm{crit})}) -\alpha \frac{\partial J_\mathrm{max}}{\partial A_{Jm}} \frac{\partial A_{Jm}}{\partial \chi}( 1-\frac{ \Delta\psi}{ (\psi_\mathrm{s} - \psi_\mathrm{crit})}) = 0
+$$
+
+$$
+\frac{\partial F}{\partial \Delta\psi} = \frac{\partial g_s}{\partial \Delta\psi} c_a (1-\chi) -(\Delta\psi\frac{\partial g_s}{\partial \Delta\psi}+g_s)(\frac{c_a (1-\chi)}{(\psi_\mathrm{s} - \psi_\mathrm{crit})})-
+\alpha \frac{\partial J_\mathrm{max}}{\partial A_{Jm}} \frac{\partial A_{Jm}}{\partial \Delta\psi}+(\Delta\psi\frac{\partial J_\mathrm{max}}{\partial A_{Jm}} \frac{\partial A_{Jm}}{\partial \Delta\psi}+J_\mathrm{max})(\frac{\alpha}{(\psi_\mathrm{s} - \psi_\mathrm{crit})}) = 0
+$$
+
