@@ -209,16 +209,13 @@ mean_alpha_calc <- function(sfn, sw_in_monthly_average, temp_monthly_average, pr
 
 data_prep <- function(df_sfn, env, opt_swc){
   df_sfn %>% 
-  left_join(env, by = c("timestamp_aggr", "TIMESTAMP")) %>%
+  left_join(env %>% dplyr::select(-TIMESTAMP), by = c("timestamp_aggr")) %>%
   bind_cols(tibble(opt_swc_slope = opt_swc[1],opt_swc_int =  opt_swc[2])) %>% 
-  # filter(!is.na(E_stand)) %>% 
-  # filter(lubridate::date(TIMESTAMP) >= lubridate::ymd(20140101), lubridate::date(TIMESTAMP) < lubridate::ymd(20150101)) %>%
   mutate(E_sapflow = E_stand/18.2, #mol m-2 h-1
          E_sapflow_sd = E_stand_sd/18.2, #mol m-2 h-1
          PPFD = PPFD*1e6/86400,
          ppfd_ERA5 = sw_ERA5 * 2.114, #transform sw ERA5 to ppfd
          netr = netr*1e6/86400,
-         patm = rpmodel::calc_patm(si_elev %>% unique()),
          swvl = swvl_aggregation(st_soil_depth,swvl1,swvl2,swvl3,swvl4),
          REW = swvl/max_swvl,
          # swvl = swc_shallow,
@@ -228,9 +225,16 @@ data_prep <- function(df_sfn, env, opt_swc){
                          !is.na(vpd)~ vpd),
          ta = case_when(is.na(ta)~ tc,
                         !is.na(ta)~ ta),
-         ppfd_in = case_when(is.na(ppfd_in) & !is.na(PPFD) ~ PPFD, #if there is ppfd in SFN, use if not use PPFD from EC and if not use ppfd calculated from SW from ERA5
+         sw_in = case_when(is.na(sw_in) & !is.na(sw_ERA5) ~ sw_ERA5, #if there is sw in SFN use it, if not use it from SW from ERA5
+                           TRUE ~ sw_in),
+         sw_in = case_when(sw_in == 0 & sw_ERA5 != 0 ~ sw_ERA5, #if sw is 0, use ppfd calculated from SW from ERA5
+                           TRUE ~ sw_in),
+         ppfd_in = case_when(is.na(ppfd_in) & !is.na(PPFD) ~ PPFD, #if there is ppfd in SFN use it, if not use PPFD from EC and if not use ppfd calculated from SW from ERA5
                              is.na(ppfd_in) & is.na(PPFD) ~ ppfd_ERA5,
                              !is.na(ppfd_in) ~ ppfd_in),
+         ppfd_in = case_when(ppfd_in == 0 & !is.na(PPFD) & PPFD!= 0 ~ PPFD, #if ppfd is 0, use PPFD from EC and if not use ppfd calculated from SW from ERA5
+                             ppfd_in == 0 & is.na(PPFD) & ppfd_ERA5 != 0 ~ ppfd_ERA5,
+                             TRUE ~ ppfd_in),
          netrad = case_when(is.na(netrad)~ netr,
                             !is.na(netrad)~ netrad),
          CO2 = case_when(is.na(CO2) ~ 400,

@@ -24,18 +24,11 @@ calc_sfn_aggr_E <- function(sfn_scale, time_aggregation = "1 week"){
   
   E_data <- sfn_scale %>% 
     mutate(TIMESTAMP = lubridate::as_date(TIMESTAMP)) %>%
-    # unique() %>% 
-    # mutate(key  = row_number()) %>%
-    as_tsibble(index = TIMESTAMP)# %>%
-    # dplyr::select(-key)
+    unique() %>% 
+    group_by(TIMESTAMP) %>%
+    summarise_all(mean) %>% 
+    as_tsibble(index = TIMESTAMP)
   
-  
-  if(time_aggregation == "3 hour" ){
-    E_data <- E_data %>% 
-      group_by_key() %>%
-      index_by(timestamp_aggr = ~ lubridate::round_date(., "3 hour")) %>%
-      summarise_all(~mean(.,na.rm=TRUE))
-  }
   
   if(time_aggregation == "1 day" ){
     E_data <- E_data %>% 
@@ -44,7 +37,7 @@ calc_sfn_aggr_E <- function(sfn_scale, time_aggregation = "1 week"){
       summarise_all(~mean(.,na.rm=TRUE))
   }
   
-  if(time_aggregation == "1 week" ){
+  if(time_aggregation == "1 week"){
     E_data <- E_data %>% 
       group_by_key() %>%
       index_by(timestamp_aggr = ~ yearweek(.)) %>%
