@@ -660,7 +660,7 @@ model_numerical <- function(tc, ppfd, vpd, co2, elv, LAI, fapar, kphio, psi_soil
   tem      = par_env$tc
   jmax_ar  = GetPhotosyntheticJmax(j25, tem)
   vcmax_ar = GetPhotosyntheticVcmax(v25, tem)
-  par_plant$conductivity = par_plant$conductivity * 0.2
+  # par_plant$conductivity = par_plant$conductivity * 0.2
   # par_plant$psi50 = par_plant$psi50 / 3
   # par_plant$d = par_plant$d / 3
   # par_plant$c = 1
