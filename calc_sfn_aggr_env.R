@@ -24,9 +24,9 @@ calc_sfn_aggr_env <- function(sfn_object, time_aggregation = "1 week"){
   
   env_data <- sfn_object %>% 
     mutate(TIMESTAMP = lubridate::as_date(TIMESTAMP))%>%
-    dplyr::select(TIMESTAMP,ta,rh,ppfd_in,sw_in,vpd,ext_rad,netrad,ws,swc_shallow,max_swvl,ext_rad,
+    dplyr::select(TIMESTAMP,ta,rh,ppfd_in,sw_in,vpd,ext_rad,netrad,ws,swc_shallow,is_st_swc_shallow,max_swvl,ext_rad,
                   swvl1:swvl4,st_soil_depth,st_sand_perc,st_clay_perc,OM,gravel,bd,depth,
-                  si_elev,FAPAR,Fapar,LAI,CO2,aet, netr, VPD, PPFD, tc,sw_ERA5) %>% 
+                  si_elev,FAPAR,Fapar,LAI,CO2,aet, netr, VPD, PPFD, tc, GPP, sw_ERA5) %>% 
     unique() %>% 
     group_by(TIMESTAMP) %>%
     summarise_all(mean) %>% 
