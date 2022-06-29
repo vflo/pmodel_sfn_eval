@@ -46,9 +46,9 @@ as.list(flx_files$sfn_sites) %>%
       swc_model <- lm(swc_shallow ~ swvl2,data=sfn)
       sfn <- sfn %>% 
         mutate(is_st_swc_shallow = case_when(is.na(swc_shallow) ~ FALSE,
-                                             !is.na(swc_shallow) ~ TRUE),
-               swc_shallow = case_when(is.na(swc_shallow) ~ swc_model$coefficients[1]+swc_model$coefficients[2]*swvl2,
-                                       !is.na(swc_shallow) ~ swc_shallow))
+                                             TRUE ~ TRUE),
+               swc_shallow = case_when(!is_st_swc_shallow ~ swc_model$coefficients[1]+swc_model$coefficients[2]*swvl2,
+                                       TRUE ~ swc_shallow))
     }
     
     #join soil properties
