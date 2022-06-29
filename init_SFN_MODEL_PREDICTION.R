@@ -15,6 +15,9 @@ library(medfate)
 # library(qgam)
 # library(GauPro)
 # source("dist_merge.R")
+library(furrr)
+plan('multisession', workers = 4)
+options('future.global.maxsize'=2*1024*1024^2)
 
 sapply(list('calc_sfn_aggr_E.R','calc_sfn_aggr_env.R',
             'calc_sfn_scale.R','swvl_aggregation.R',
