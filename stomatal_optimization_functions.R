@@ -494,10 +494,10 @@ fn_profit <- function(par, psi_soil, par_cost, e_crit, par_photosynth, par_plant
   }
 }
 
-optimise_stomata_phydro <- function(fn_profit, psi_soil, par_cost, e_crit, p_crit, par_photosynth, par_plant, par_env, return_all = FALSE, opt_hypothesis){
+optimise_stomata_phydro <- function(fn_profit, psi_soil, par_cost, e_crit, p_crit, par_photosynth, par_plant, par_env, return_all = FALSE, do_optim=TRUE, opt_hypothesis){
   
   out_optim <- optimr::optimr(
-    par            = c(logjmax=0, dpsi=1),  
+    par            = c(logjmax=0, dpsi=p_crit/2),  
     lower          = c(-10, .0001),
     upper          = c(6, -p_crit),
     fn             = fn_profit,
@@ -507,7 +507,7 @@ optimise_stomata_phydro <- function(fn_profit, psi_soil, par_cost, e_crit, p_cri
     par_photosynth = par_photosynth,
     par_plant      = par_plant,
     par_env        = par_env,
-    do_optim       = TRUE,
+    do_optim       = do_optim,
     opt_hypothesis = opt_hypothesis,
     method         = "L-BFGS-B",
     control        = list(maxit = 500, maximize = TRUE, fnscale = 1e2)
@@ -632,7 +632,7 @@ fn_profit_phydro_wap <- function(par, psi_soil, e_crit, par_cost, par_photosynth
 ###########################################
 ## MODEL OPTIMIZATION AND DATA PREPARATION
 ###########################################
-model_numerical <- function(tc, ppfd, vpd, nR, co2, elv, LAI, fapar, kphio, psi_soil, par_plant, stomatal_model = "sperry"){
+model_numerical <- function(tc, ppfd, vpd, co2, elv, LAI, fapar, kphio, psi_soil, par_plant,par_cost = NULL, stomatal_model = "sperry"){
   
   patm = rpmodel::calc_patm(elv)
   par_photosynth <- list(
@@ -651,7 +651,6 @@ model_numerical <- function(tc, ppfd, vpd, nR, co2, elv, LAI, fapar, kphio, psi_
     patm            = patm,
     tc              = tc,
     vpd             = vpd,
-    nR              = nR,
     LAI             = LAI
   )
   

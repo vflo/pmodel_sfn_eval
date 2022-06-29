@@ -1,3 +1,7 @@
+source("stomatal_optimization_functions.R")
+library(tidyverse)
+library(rpmodel)
+
 par_plant = list(
   # Ks0=1e-12,              # m2
   # v_huber=1e-4,           #
@@ -186,7 +190,7 @@ calc_gs_LC <- function (dpsi, psi_soil, par_plant, par_env, ...){
 # 
 # 
 
-p_crit = par_plant$d * log(1000.0) ^ (1.0/par_plant$c)
+p_crit = par_plant$psi50 * (log(1000)/log(2)) ^ ( 1/par_plant$b)
 
 par_plant = list(
   # Ks0=1e-12,              # m2
@@ -336,7 +340,7 @@ dens_water = par_env$density_water
 p_crit     = d * log(1000.0) ^ (1.0/c)
 e_crit = get_e_crit(psi_soil, K, d, c, h, dens_water) #mol m-2 (ground) s-1
 
-jmax <- seq(-1,7,1)
+jmax <- 4
 pl <- seq(0.02,5,0.02)
 par <- expand.grid(logjmax = jmax, dpsi = pl)
 
