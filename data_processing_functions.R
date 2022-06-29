@@ -21,6 +21,7 @@ add_miss_var <- function(sfn=sfn){
   if(!any(colnames(sfn) == "PPFD")){sfn <- sfn %>% mutate(PPFD = NA)}
   if(!any(colnames(sfn) == "tc")){sfn <- sfn %>% mutate(tc = c(NA))}
   if(!any(colnames(sfn) == "VPD")){sfn <- sfn %>% mutate(VPD = c(NA))}
+  if(!any(colnames(sfn) == "GPP")){sfn <- sfn %>% mutate(GPP = c(NA))}
   sfn
 }
 
@@ -218,7 +219,7 @@ data_prep <- function(df_sfn, env, opt_swc){
          netr = netr*1e6/86400,
          swvl = swvl_aggregation(st_soil_depth,swvl1,swvl2,swvl3,swvl4),
          REW = swvl/max_swvl,
-         # swvl = swc_shallow,
+         swvl = swc_shallow,
          swvl =  opt_swc_slope*swvl+opt_swc_int,
          # REW = (swvl-min(swvl,na.rm = TRUE))/(max(swvl,na.rm = TRUE)-min(swvl,na.rm = TRUE)),
          vpd = case_when(is.na(vpd)~ VPD/1000,
