@@ -1,7 +1,7 @@
 source("init_SFN_MODEL_PREDICTION.R")
 
 #### MODEL CALCULATION ####
-as.list(list_files) %>%
+as.list(list_files) %>% 
   furrr::future_map(function(x){
     load(x)
     print(gsub(".*/","",x = x))
@@ -16,6 +16,8 @@ as.list(list_files) %>%
     
     #### SPATIAL AND TEMPORAL DATA AGGREGATION ####
     sfn_agr <- calc_sfn_scale(sfn)
+    sfn_aggr_day <- calc_sfn_aggr_E(sfn_agr,"1 day")
+    env_day <- calc_sfn_aggr_env(sfn,"1 day")
     sfn_aggr_week <- calc_sfn_aggr_E(sfn_agr,"1 week")
     env_week <- calc_sfn_aggr_env(sfn,"1 week")
     env_week <- env_week %>% mutate(CO2 = oce::fillGap(CO2))
@@ -32,6 +34,187 @@ as.list(list_files) %>%
     #### PMODEL WEEKLY ####
     #DATA preparation
     df <- data_prep(sfn_aggr_week, env_week, opt_swc) %>% bind_cols(si_code = si_code)
+
+    # par_plant_std$conductivity <- par_plant_std$conductivity*0.15
+    # par_plant_std$d <- par_plant_std$d*1.2
+    sensitivity <- tibble(sensitivity_K = c(seq(0.5,1.5,0.1), rep(1,11)),
+                          sensitivity_psi = c(rep(1,11), seq(0.5,1.5,0.1))) %>% distinct()
+
+    #subset
+    # df <- df[c(200:350),]
+    # df <- df %>% filter(vpd>=1)
+
+    #### MODEL CALCULATION ####
+    ## PMODEL ##
+    print("Calculating PMODEL")
+    pmodel <- calc_pmodel(df, soil, par_plant_std)%>% as_tibble()
+
+    # PMODEL SWC limitation
+    print("Calculating PMODEL with swc limitation")
+    pmodel_swc <- calc_pmodel_swc(df, meanalpha, soil, par_plant_std)%>% as_tibble()
+
+    # PHydro if there is species information
+    print("Calculating PHYDRO")
+    sensitivity[6,]  %>%
+      split(seq(nrow(.)))%>%
+      purrr::map(function(x){
+        calc_phydro_schemes(df, PHYDRO_TRUE, par_plant_std, soil,
+                            x, stomatal_model = 'phydro') %>% as_tibble()
+      })  %>%  bind_rows() -> phydro
+
+
+    # PHydro-Wang if there is species information
+    print("Calculating PHYDRO-WANG")
+    sensitivity[6,]  %>%
+      split(seq(nrow(.)))%>%
+      purrr::map(function(x){
+        calc_phydro_schemes(df, PHYDRO_TRUE, par_plant_std, soil, 
+                            x, stomatal_model = 'phydro_wang') %>% as_tibble()
+      })  %>%  bind_rows() -> phydro_wang
+    
+    # PHydro-Sperry if there is species information
+    print("Calculating PHYDRO-PROFITMAX")
+    sensitivity[6,]  %>%
+      split(seq(nrow(.)))%>%
+      purrr::map(function(x){
+        calc_phydro_schemes(df, PHYDRO_TRUE, par_plant_std, soil, 
+                            x, stomatal_model = 'phydro_sperry') %>% as_tibble()
+      })  %>%  bind_rows() -> phydro_sperry
+
+    # PHydro-CMax if there is species information
+    print("Calculating PHYDRO-CMAX")
+    sensitivity[6,]  %>%
+      split(seq(nrow(.)))%>%
+      purrr::map(function(x){
+        calc_phydro_schemes(df, PHYDRO_TRUE, par_plant_std, soil, 
+                            x, stomatal_model = 'phydro_cmax') %>% as_tibble()
+      })  %>%  bind_rows() -> phydro_cmax
+    
+    # PHydro-SOX if there is species information
+    print("Calculating PHYDRO-SOX")
+    sensitivity[6,]  %>%
+      split(seq(nrow(.)))%>%
+      purrr::map(function(x){
+        calc_phydro_schemes(df, PHYDRO_TRUE, par_plant_std, soil, 
+                            x, stomatal_model = 'phydro_sox') %>% as_tibble()
+      })  %>%  bind_rows() -> phydro_sox
+    
+    # Sperry model
+    print("Calculating SPERRY model")
+    sensitivity[6,] %>%
+      split(seq(nrow(.)))%>%
+      purrr::map(function(x){
+        calc_phydro_schemes(df, PHYDRO_TRUE, par_plant_std, soil, 
+                            x, stomatal_model = 'sperry') %>% as_tibble()
+      }) %>%  bind_rows() -> sperry
+
+    # Wang model
+    print("Calculating WANG model")
+    sensitivity[6,]%>%
+      split(seq(nrow(.)))%>%
+      purrr::map(function(x){
+        calc_phydro_schemes(df, PHYDRO_TRUE, par_plant_std, soil, 
+                            x, stomatal_model = 'wang') %>% as_tibble()
+      }) %>% bind_rows() -> wang
+
+    # Wap model
+    print("Calculating CMax model")
+    sensitivity[6,] %>%
+      split(seq(nrow(.)))%>%
+      purrr::map(function(x){
+        calc_phydro_schemes(df, PHYDRO_TRUE, par_plant_std, soil, 
+                            x, stomatal_model = 'cmax') %>% as_tibble()
+      }) %>%  bind_rows() -> cmax
+
+    
+    # SOX model
+    print("Calculating SOX model")
+    sensitivity[6,] %>%
+      split(seq(nrow(.)))%>%
+      purrr::map(function(x){
+        calc_phydro_schemes(df, PHYDRO_TRUE, par_plant_std, soil, 
+                            x, stomatal_model = 'sox') %>% as_tibble()
+      }) %>%  bind_rows() -> sox
+
+    if(exists('phydro')){
+    df_res <- pmodel %>%
+      bind_rows(pmodel_swc) %>%
+      bind_rows(phydro) %>%
+      bind_rows(phydro_wang) %>%
+      bind_rows(phydro_sperry) %>%
+      bind_rows(phydro_cmax) %>%
+      bind_rows(phydro_sox) %>%
+      bind_rows(sperry) %>%
+      bind_rows(wang) %>%
+      bind_rows(cmax) %>%
+      bind_rows(sox) %>%
+      # bind_rows(pmodel_ecrit) %>%
+      cbind(swp_corrected = unique(sfn$swp_corrected)) %>%
+      suppressMessages()
+    }else{
+      df_res<- pmodel %>%
+        bind_rows(pmodel_swc)
+    }
+    # 
+    df_res$grp <- format(df_res$TIMESTAMP, "%Y")
+    df_res %>%
+      filter(low_swp == FALSE,E_stand_QF==TRUE,is_st_swc_shallow == 1) %>%
+      # filter(model_type == "phydro_wang") %>% # dplyr::select(p_leaf, psi_soil,model_type, gs) %>% View()
+      mutate(model_type = as.factor(model_type)) %>%
+      ggplot()+
+      # geom_point(aes(TIMESTAMP,psi_soil))+
+      # geom_point(aes(log(-psi_soil),gs,color=model_type), shape = 21, alpha = 0.5)+
+      # geom_point(aes(log(-psi_soil),Gs_sapflow),fill = "grey40",color = "grey40", shape = 21, alpha = 0.5)+
+      # geom_smooth(aes(log(-psi_soil),gs,color=model_type),method="gam",se = FALSE)+
+      # geom_smooth(aes(log(-psi_soil),Gs_sapflow),color = "grey40",method="lm", formula = 'y~poly(x,4)')+
+      # geom_point(aes(psi_soil,gs))+
+      # geom_point(aes(vpd,gs),  alpha = 0.5)+
+      # geom_point(aes(vpd,gs,color=model_type), shape = 21, alpha = 0.5)+
+      # geom_point(aes(vpd,Gs_sapflow),fill = "grey40",color = "grey40", shape = 21, alpha = 0.5)+
+      # geom_smooth(aes(vpd,gs,color=model_type),method="gam",se = FALSE)+
+      # geom_smooth(aes(vpd,Gs_sapflow),color = "grey40",method="lm", formula = 'y~poly(x,4)')+
+      # geom_point(aes(log(-psi_soil),E,color=model_type), shape = 21, alpha = 0.5)+
+      # geom_point(aes(log(-psi_soil),E_sapflow),fill = "grey40",color = "grey40", shape = 21, alpha = 0.5)+
+      # geom_smooth(aes(log(-psi_soil),E,color=model_type),method="gam",se = FALSE)+
+      # geom_smooth(aes(log(-psi_soil),E_sapflow),color = "grey40",method="lm", formula = 'y~poly(x,3)')+
+      # geom_point(aes(psi_soil, p_leaf,color=model_type), shape = 21, alpha = 0.5)+
+      # geom_smooth(aes(psi_soil,p_leaf,color=model_type),method="gam",se = FALSE)+
+      # geom_abline(intercept = 0, slope = 1, linetype = 2)+
+      # geom_point(aes(gs, Gs_sapflow,color=model_type), shape = 21, alpha = 0.5)+
+      # geom_smooth(aes(gs, Gs_sapflow,color=model_type), shape = 21, alpha = 0.5, method = "lm")+
+      # geom_abline(intercept = 0, slope = 1, linetype = 2)+
+      # geom_point(aes(E, E_sapflow,color=model_type), shape = 21, alpha = 0.5)+
+      # geom_smooth(aes(E, E_sapflow,color=model_type), shape = 21, alpha = 0.5, method = "lm")+
+      # geom_abline(intercept = 0, slope = 1, linetype = 2)+
+      # geom_point(aes(gpp/12.0107, GPP,color=model_type), shape = 21, alpha = 0.5)+
+      # geom_smooth(aes(gpp/12.0107, GPP,color=model_type), shape = 21, alpha = 0.5, method = "lm")+
+      # geom_point(aes(a, GPP,color=model_type), shape = 21, alpha = 0.5)+
+      # geom_smooth(aes(a, GPP,color=model_type), shape = 21, alpha = 0.5, method = "lm")+
+      geom_ribbon(aes(x=TIMESTAMP, ymin = (Gs_sapflow - Gs_sapflow_sd), ymax = (Gs_sapflow + Gs_sapflow_sd),
+                      group = grp), fill = "grey" )+
+      geom_line(aes(TIMESTAMP,Gs_sapflow,group = grp),color = "black")+
+      geom_line(aes(TIMESTAMP,gs, color=model_type,group = interaction(grp,model_type)))+
+      # geom_line(aes(TIMESTAMP,GPP,group = grp),color = "black")+
+      # geom_line(aes(TIMESTAMP,gpp/12.0107, color=model_type,group = interaction(grp,model_type)))+
+      # geom_line(aes(TIMESTAMP,a, color=model_type,group = interaction(grp,model_type)))+
+      # geom_line(aes(TIMESTAMP,LAI,group = grp), color = "green")+
+      # geom_ribbon(aes(x=TIMESTAMP, ymin = (E_sapflow -E_sapflow_sd), ymax = (E_sapflow + E_sapflow_sd),
+      #                 group = grp), fill = "grey" )+
+      # geom_line(aes(TIMESTAMP,E_sapflow,group = grp),color = "black")+
+      # geom_line(aes(TIMESTAMP,E, color=model_type,group = interaction(grp,model_type)))+
+      theme_bw()+
+      # ylim(-4,0)+
+      NULL
+    
+    #### SAVE DATA ####
+    if(nrow(df_res)>0){
+      save(df_res, file = paste0("DATA/OUTCOME_WEEKLY/",(gsub(".*/","",x = x))))
+    }
+    
+    
+    #### PMODEL DAILY ####
+    #DATA preparation
+    df <- data_prep(sfn_aggr_day, env_day, opt_swc) %>% bind_cols(si_code = si_code)
     
     # par_plant_std$conductivity <- par_plant_std$conductivity*0.15
     # par_plant_std$d <- par_plant_std$d*1.2
@@ -58,7 +241,7 @@ as.list(list_files) %>%
       purrr::map(function(x){
         calc_phydro(df, PHYDRO_TRUE, par_plant_std, soil, x) %>% as_tibble()
       })  %>%  bind_rows() -> phydro 
-
+    
     
     # PHydro-Wang if there is species information 
     print("Calculating PHYDRO-WANG")
@@ -102,77 +285,78 @@ as.list(list_files) %>%
     #   }) %>% bind_rows() -> pmodel_ecrit
     
     if(exists('phydro')){
-    df_res <- pmodel %>% 
-      bind_rows(pmodel_swc) %>% 
-      bind_rows(phydro) %>%
-      bind_rows(phydro_wang) %>% 
-      bind_rows(sperry) %>% 
-      bind_rows(wang) %>% 
-      bind_rows(wap) %>%
-      # bind_rows(pmodel_ecrit) %>%
-      cbind(swp_corrected = unique(sfn$swp_corrected)) %>%
-      suppressMessages()
+      df_res <- pmodel %>% 
+        bind_rows(pmodel_swc) %>% 
+        bind_rows(phydro) %>%
+        bind_rows(phydro_wang) %>% 
+        bind_rows(sperry) %>% 
+        bind_rows(wang) %>% 
+        bind_rows(wap) %>%
+        # bind_rows(pmodel_ecrit) %>%
+        cbind(swp_corrected = unique(sfn$swp_corrected)) %>%
+        suppressMessages()
     }else{
       df_res<- pmodel %>% 
         bind_rows(pmodel_swc)
     }
-    # 
-    # df_res$grp <- format(df_res$TIMESTAMP, "%Y")
-    # df_res %>%
-    #   filter(low_swp == FALSE,E_stand_QF==TRUE,is_st_swc_shallow == 1) %>%
-    #   # filter(model_type == "phydro_wang") %>% # dplyr::select(p_leaf, psi_soil,model_type, gs) %>% View()
-    #   mutate(model_type = as.factor(model_type)) %>% 
-    #   ggplot()+
-    #   # geom_point(aes(TIMESTAMP,psi_soil))+
-    #   # geom_point(aes(log(-psi_soil),gs,color=model_type), shape = 21, alpha = 0.5)+
-    #   # geom_point(aes(log(-psi_soil),Gs_sapflow),fill = "grey40",color = "grey40", shape = 21, alpha = 0.5)+
-    #   # geom_smooth(aes(log(-psi_soil),gs,color=model_type),method="gam",se = FALSE)+
-    #   # geom_smooth(aes(log(-psi_soil),Gs_sapflow),color = "grey40",method="lm", formula = 'y~poly(x,4)')+
-    #   # geom_point(aes(psi_soil,gs))+
-    #   # geom_point(aes(vpd,gs),  alpha = 0.5)+
-    #   # geom_point(aes(vpd,gs,color=model_type), shape = 21, alpha = 0.5)+
-    #   # geom_point(aes(vpd,Gs_sapflow),fill = "grey40",color = "grey40", shape = 21, alpha = 0.5)+
-    #   # geom_smooth(aes(vpd,gs,color=model_type),method="gam",se = FALSE)+
-    #   # geom_smooth(aes(vpd,Gs_sapflow),color = "grey40",method="lm", formula = 'y~poly(x,4)')+
-    #   # geom_point(aes(log(-psi_soil),E,color=model_type), shape = 21, alpha = 0.5)+
-    #   # geom_point(aes(log(-psi_soil),E_sapflow),fill = "grey40",color = "grey40", shape = 21, alpha = 0.5)+
-    #   # geom_smooth(aes(log(-psi_soil),E,color=model_type),method="gam",se = FALSE)+
-    #   # geom_smooth(aes(log(-psi_soil),E_sapflow),color = "grey40",method="lm", formula = 'y~poly(x,3)')+
-    #   # geom_point(aes(psi_soil, p_leaf,color=model_type), shape = 21, alpha = 0.5)+
-    #   # geom_smooth(aes(psi_soil,p_leaf,color=model_type),method="gam",se = FALSE)+
-    #   # geom_abline(intercept = 0, slope = 1, linetype = 2)+
-    #   # geom_point(aes(gs, Gs_sapflow,color=model_type), shape = 21, alpha = 0.5)+
-    #   # geom_smooth(aes(gs, Gs_sapflow,color=model_type), shape = 21, alpha = 0.5, method = "lm")+
-    #   # geom_abline(intercept = 0, slope = 1, linetype = 2)+
-    #   # geom_point(aes(E, E_sapflow,color=model_type), shape = 21, alpha = 0.5)+
-    #   # geom_smooth(aes(E, E_sapflow,color=model_type), shape = 21, alpha = 0.5, method = "lm")+
-    #   geom_abline(intercept = 0, slope = 1, linetype = 2)+
-    #   geom_point(aes(gpp/12.0107, GPP,color=model_type), shape = 21, alpha = 0.5)+
-    #   geom_smooth(aes(gpp/12.0107, GPP,color=model_type), shape = 21, alpha = 0.5, method = "lm")+
-    #   geom_point(aes(a, GPP,color=model_type), shape = 21, alpha = 0.5)+
-    #   geom_smooth(aes(a, GPP,color=model_type), shape = 21, alpha = 0.5, method = "lm")+
-    #   # geom_ribbon(aes(x=TIMESTAMP, ymin = (Gs_sapflow - Gs_sapflow_sd), ymax = (Gs_sapflow + Gs_sapflow_sd),
-    #   #                 group = grp), fill = "grey" )+
-    #   # geom_line(aes(TIMESTAMP,Gs_sapflow,group = grp),color = "black")+
-    #   # geom_line(aes(TIMESTAMP,gs, color=model_type,group = interaction(grp,model_type)))+
-    #   # geom_ribbon(aes(x=TIMESTAMP, ymin = (Gs_sapflow - Gs_sapflow_sd), ymax = (Gs_sapflow + Gs_sapflow_sd),
-    #   #                 group = grp), fill = "grey" )+
-    #   # geom_line(aes(TIMESTAMP,Gs_sapflow,group = grp),color = "black")+
-    #   # geom_line(aes(TIMESTAMP,GPP,group = grp),color = "black")+
-    #   # geom_line(aes(TIMESTAMP,gpp/12.0107, color=model_type,group = interaction(grp,model_type)))+
-    #   # geom_line(aes(TIMESTAMP,a, color=model_type,group = interaction(grp,model_type)))+
-    #   # geom_line(aes(TIMESTAMP,LAI,group = grp), color = "green")+
-    #   # geom_ribbon(aes(x=TIMESTAMP, ymin = (E_sapflow -E_sapflow_sd), ymax = (E_sapflow + E_sapflow_sd),
-    #   #                 group = grp), fill = "grey" )+
-    #   # geom_line(aes(TIMESTAMP,E_sapflow,group = grp),color = "black")+
-    #   # geom_line(aes(TIMESTAMP,E, color=model_type,group = interaction(grp,model_type)))+
-    #   theme_bw()+
-    #   # ylim(-4,0)+
-    #   NULL
+# 
+#     df_res$grp <- format(df_res$TIMESTAMP, "%Y")
+#     df_res %>%
+#       filter(low_swp == FALSE, E_stand_QF==TRUE, is_st_swc_shallow == 1) %>%
+#       # filter(model_type == "phydro_wang") %>% # dplyr::select(p_leaf, psi_soil,model_type, gs) %>% View()
+#       mutate(model_type = as.factor(model_type)) %>%
+#       ggplot()+
+#       # geom_point(aes(TIMESTAMP,psi_soil))+
+#       # geom_point(aes(log(-psi_soil),gs,color=model_type), shape = 21, alpha = 0.5)+
+#       # geom_point(aes(log(-psi_soil),Gs_sapflow),fill = "grey40",color = "grey40", shape = 21, alpha = 0.5)+
+#       # geom_smooth(aes(log(-psi_soil),gs,color=model_type),method="gam",se = FALSE)+
+#       # geom_smooth(aes(log(-psi_soil),Gs_sapflow),color = "grey40",method="lm", formula = 'y~poly(x,4)')+
+#       # geom_point(aes(log(-psi_soil),E,color=model_type), shape = 21, alpha = 0.5)+
+#       # geom_point(aes(log(-psi_soil),E_sapflow),fill = "grey40",color = "grey40", shape = 21, alpha = 0.5)+
+#       # geom_smooth(aes(log(-psi_soil),E,color=model_type),method="gam",se = FALSE)+
+#       # geom_smooth(aes(log(-psi_soil),E_sapflow),color = "grey40",method="lm", formula = 'y~poly(x,4)')+
+#       # geom_point(aes(psi_soil,gs))+
+#       # geom_point(aes(vpd,gs),  alpha = 0.5)+
+#       # geom_point(aes(vpd,gs,color=model_type), shape = 21, alpha = 0.5)+
+#       # geom_point(aes(vpd,Gs_sapflow),fill = "grey40",color = "grey40", shape = 21, alpha = 0.5)+
+#       # geom_smooth(aes(vpd,gs,color=model_type),method="gam",se = FALSE)+
+#       # geom_smooth(aes(vpd,Gs_sapflow),color = "grey40",method="lm", formula = 'y~poly(x,4)')+
+#       # geom_point(aes(log(-psi_soil),E,color=model_type), shape = 21, alpha = 0.5)+
+#       # geom_point(aes(log(-psi_soil),E_sapflow),fill = "grey40",color = "grey40", shape = 21, alpha = 0.5)+
+#       # geom_smooth(aes(log(-psi_soil),E,color=model_type),method="gam",se = FALSE)+
+#       # geom_smooth(aes(log(-psi_soil),E_sapflow),color = "grey40",method="lm", formula = 'y~poly(x,3)')+
+#       geom_point(aes(psi_soil, p_leaf,color=model_type), shape = 21, alpha = 0.5)+
+#       geom_smooth(aes(psi_soil,p_leaf,color=model_type),method="gam",se = FALSE)+
+#       geom_abline(intercept = 0, slope = 1, linetype = 2)+
+#       # geom_point(aes(gs, Gs_sapflow,color=model_type), shape = 21, alpha = 0.5)+
+#       # geom_smooth(aes(gs, Gs_sapflow,color=model_type), shape = 21, alpha = 0.5, method = "lm")+
+#       # geom_abline(intercept = 0, slope = 1, linetype = 2)+
+#       # geom_point(aes(E, E_sapflow,color=model_type), shape = 21, alpha = 0.5)+
+#       # geom_smooth(aes(E, E_sapflow,color=model_type), shape = 21, alpha = 0.5, method = "lm")+
+#       # geom_abline(intercept = 0, slope = 1, linetype = 2)+
+#       # geom_point(aes(gpp/12.0107, GPP,color=model_type), shape = 21, alpha = 0.5)+
+#       # geom_smooth(aes(gpp/12.0107, GPP,color=model_type), shape = 21, alpha = 0.5, method = "lm")+
+#       # geom_point(aes(a, GPP,color=model_type), shape = 21, alpha = 0.5)+
+#       # geom_smooth(aes(a, GPP,color=model_type), shape = 21, alpha = 0.5, method = "lm")+
+#       # geom_ribbon(aes(x=TIMESTAMP, ymin = (Gs_sapflow - Gs_sapflow_sd), ymax = (Gs_sapflow + Gs_sapflow_sd),
+#       #                 group = grp), fill = "grey" )+
+#       # geom_line(aes(TIMESTAMP,Gs_sapflow,group = grp),color = "black")+
+#       # geom_line(aes(TIMESTAMP,gs, color=model_type,group = interaction(grp,model_type)))+
+#       # geom_line(aes(TIMESTAMP,GPP,group = grp),color = "black")+
+#       # geom_line(aes(TIMESTAMP,gpp/12.0107, color=model_type,group = interaction(grp,model_type)))+
+#       # geom_line(aes(TIMESTAMP,a, color=model_type,group = interaction(grp,model_type)))+
+#       # geom_line(aes(TIMESTAMP,LAI,group = grp), color = "green")+
+#       # geom_ribbon(aes(x=TIMESTAMP, ymin = (E_sapflow -E_sapflow_sd), ymax = (E_sapflow + E_sapflow_sd),
+#       #                 group = grp), fill = "grey" )+
+#       # geom_line(aes(TIMESTAMP,E_sapflow,group = grp),color = "black")+
+#       # geom_line(aes(TIMESTAMP,E, color=model_type,group = interaction(grp,model_type)))+
+#       theme_bw()+
+#       # ylim(-4,0)+
+#       NULL
     
     #### SAVE DATA ####
     if(nrow(df_res)>0){
-      save(df_res, file = paste0("DATA/OUTCOME_WEEKLY/",(gsub(".*/","",x = x))))
+      save(df_res, file = paste0("DATA/OUTCOME_DAILY/",(gsub(".*/","",x = x))))
     }
     
     

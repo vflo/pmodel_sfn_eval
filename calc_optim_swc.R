@@ -36,7 +36,9 @@ optim_swc <- function(sfn_object, psi_data, soil=soil, min_swc = 0, max_swc = 0.
   }else{
     #psi data preparation
     psi <- psi %>% 
-      mutate(date = lubridate::date(TIMESTAMP)) %>% 
+      mutate(date = lubridate::date(TIMESTAMP),
+             psi_N = case_when(is.na(psi_N)~1,
+                               TRUE~psi_N)) %>% 
       rename(n_psi = 'psi_N') %>% 
       dplyr::select(date,psi,n_psi) %>% 
       group_by(date) %>% 
@@ -90,7 +92,12 @@ optim_swc <- function(sfn_object, psi_data, soil=soil, min_swc = 0, max_swc = 0.
     return(rmse)
     }
     
-  df <- optim(c(1.1,0.1), swc_increment)$par
+    if(nrow(psi)>1){
+      df <- list(optim(c(1.1,0.1), swc_increment)$par,psi)
+    }else{
+      df <- list(optim(c(1.1,0.1), swc_increment)$par,psi)
+      df[[1]][1] <- 1
+    }
   }
   return(df)
 }

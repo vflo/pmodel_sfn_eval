@@ -127,12 +127,21 @@ as.list(flx_files$sfn_sites) %>%
     is_psi_data <- any(lubridate::date(psi_data_site$TIMESTAMP) %in% lubridate::date(sfn$TIMESTAMP)) 
     
     if(is_psi_data){
-      opt_swc <- optim_swc(sfn, PSI_DF, soil, type ="swc")
+      temp <- optim_swc(sfn, psi_data_site, soil, type ="swc")
+      opt_swc <- temp[[1]]
       sfn$swp_corrected <- TRUE
+      sfn <- sfn %>% 
+        mutate(date = lubridate::date(TIMESTAMP)) %>% 
+        left_join(temp[[2]],by="date") %>% 
+        rename(psi_predawn = psi) %>% 
+        select(-date)
+      
     }else{
       opt_swc <- c(1,0)
       sfn$swp_corrected <- FALSE
+      sfn$psi_predawn <- NA
     }
+
     
     #### FAPAR ####
     sfn <- include_fapar_lai(sfn, fapar_noaa, fapar)

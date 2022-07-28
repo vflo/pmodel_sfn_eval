@@ -24,7 +24,8 @@ sapply(list('calc_sfn_aggr_E.R','calc_sfn_aggr_env.R',
             'calc_optim_swc.R','do_phydro_params.R',
             'data_processing_functions.R','calc_models.R',
             'stomatal_optimization_functions.R', 
-            'pmodel_ecrit.R'), source, .GlobalEnv)
+            'pmodel_ecrit.R','photosynthetic_functions.R',
+            'hydraulic_functions.R'), source, .GlobalEnv)
 
 #### LOAD DATA LIST ####
 path <- "DATA/PREPARED_DATA_LIST"

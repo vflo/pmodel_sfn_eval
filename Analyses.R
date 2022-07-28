@@ -48,30 +48,37 @@ paths_weekly %>%
 df <- df %>% 
   left_join(sfn_meta$site_md %>% dplyr::select(-si_elev), by = "si_code") %>% 
   left_join(par_plant %>% dplyr::select(-LAI), by = "si_code") %>% 
-  mutate(sensitivity_K = case_when(is.na(sensitivity_K)~1,
-                                   TRUE~sensitivity_K),
-         sensitivity_psi = case_when(is.na(sensitivity_psi)~1,
-                                   TRUE~sensitivity_psi),
+  mutate(
+         # sensitivity_K = case_when(is.na(sensitivity_K)~1,
+         #                           TRUE~sensitivity_K),
+         # sensitivity_psi = case_when(is.na(sensitivity_psi)~1,
+         #                           TRUE~sensitivity_psi),
          gpp = case_when(model_type %in% c("pmodel")~gpp*1e6,
                          TRUE~gpp),
-         a = case_when(model_type %in% c("phydro","sperry", "wang", "wap")~a*LAI,
+         a = case_when(model_type %in% c("phydro","phydro_wang","sperry", "wang", "wap")~a*LAI,
                          TRUE~a),
          gpp_all = case_when(is.na(gpp)~a*3600*1e-6, #to mol m-2 h-1
                              TRUE ~ gpp*3600*1e-6),  #to mol m-2 h-1
          log_psi = log(-psi_soil)
          ) %>% 
   filter(!is.na(E_sapflow),!is.na(E), E>0, E_sapflow>0
-         ,low_swp==FALSE, model_type != "pmodel_swc"
-         ) %>% 
+         ,low_swp==FALSE, model_type != "pmodel_swc",
+         E_stand_QF==TRUE, is_st_swc_shallow == 1) %>% 
   group_by(si_code, model_type,sensitivity_K,sensitivity_psi) %>%
   mutate(max_E = max(E),
          max_E_sapflow = max(E_sapflow),
          E_rel = E/max_E,
          E_sapflow_rel = E_sapflow/max_E_sapflow,
          E_dif = E - E_sapflow,
-         E_dif_rel = E_rel - E_sapflow_rel) %>% 
-  as_tibble() %>% 
-  dplyr::select(-c(1,3:4,8,14:18,74:85,90:92))
+         E_dif_rel = E_rel - E_sapflow_rel,
+         max_gs = max(gs),
+         max_Gs_sapflow = max(Gs_sapflow),
+         gs_rel = gs/max_gs,
+         Gs_sapflow_rel = Gs_sapflow/max_Gs_sapflow,
+         gs_dif = gs - Gs_sapflow,
+         gs_dif_rel = gs_rel - Gs_sapflow_rel) %>% 
+  as_tibble()# %>% 
+  # dplyr::select(-c(1,3:4,8,14:18,74:85,90:92))
 
 rm("par_plant","sfn_meta")
 gc(reset = TRUE)
@@ -80,17 +87,27 @@ gc(reset = TRUE)
 
 # WEEKLY DATA ------------------------------------------------------
 df_lm <- df %>% 
-  group_by(si_code, model_type,sensitivity_K,sensitivity_psi) %>% 
+  group_by(si_code, model_type#,sensitivity_K,sensitivity_psi
+           ) %>% 
   do(lm(E_sapflow ~ E, data = .) %>% broom::glance())
 
+df_gs_lm <- df %>% 
+  group_by(si_code, model_type#,sensitivity_K,sensitivity_psi
+  ) %>% 
+  do(lm(Gs_sapflow ~ gs, data = .) %>% broom::glance())
 
 df_summary <- df %>% 
-  group_by(si_code, model_type,sensitivity_K,sensitivity_psi) %>% 
+  group_by(si_code, model_type#,sensitivity_K,sensitivity_psi
+           ) %>% 
   summarise(n = n(),
             cor_value = weightedCorr(E_sapflow,E, method ="Pearson"),
             rmse = rmse(E_sapflow, E),
             mae = mae(E_sapflow, E),
             bias = bias(E_sapflow, E),
+            gs_cor_value = weightedCorr(Gs_sapflow,gs, method ="Pearson"),
+            gs_rmse = rmse(Gs_sapflow, gs),
+            gs_mae = mae(Gs_sapflow, gs),
+            gs_bias = bias(Gs_sapflow, gs),
             si_map = unique(si_map),
             si_mat = unique(si_mat),
             si_elev = unique(si_elev),
@@ -108,7 +125,10 @@ df_summary <- df %>%
             height = mean(height, na.rm = TRUE),
             gpp_all = mean(gpp_all, na.rm = TRUE)) 
 
-df_summary <- df_summary %>% left_join(df_lm)
+df_summary <- df_summary %>% 
+  left_join(df_lm) %>% 
+  left_join(df_gs_lm%>% 
+              rename_with(~paste0(., "_gs"), 3:14))
 
 sensitivity_references <- df_summary %>% 
   ungroup() %>% 
@@ -133,10 +153,10 @@ get_density <- function(x, y, ...) {
 #### TIMESERIES example ####
 df$grp <- format(df$TIMESTAMP, "%Y")
 df %>% 
-  filter(sensitivity_K == 1, 
-         sensitivity_psi == 1, 
-         model_type %in% c("pmodel_ecrit","pmodel", 'phydro',"sperry","wap","wang"), 
-         si_code == "FRA_FON") %>%
+  filter(#sensitivity_K == 1, 
+         #sensitivity_psi == 1, 
+         model_type %in% c("pmodel", 'phydro','phydro_wang',"sperry","wap","wang"), 
+         si_code == "PRT_LEZ_ARN") %>%
   dplyr::select(TIMESTAMP, grp, model_type, E, E_sapflow,E_sapflow_sd) %>% 
   pivot_wider(names_from = model_type, values_from = E) %>% 
   ggplot()+
@@ -149,19 +169,19 @@ df %>%
   geom_line(aes(TIMESTAMP,wap,group = grp), color = ghibli_pal[[5]])+
   geom_line(aes(TIMESTAMP,sperry,group = grp), color = ghibli_pal[[4]])+
   geom_line(aes(TIMESTAMP,phydro,group = grp), color = ghibli_pal[[3]])+
-  geom_line(aes(TIMESTAMP,pmodel_ecrit,group = grp), color = ghibli_pal[[2]])+
+  geom_line(aes(TIMESTAMP,phydro_wang,group = grp), color = ghibli_pal[[2]])+
   geom_line(aes(TIMESTAMP,pmodel,group = grp), color = ghibli_pal[[1]])+
   geom_path(aes(TIMESTAMP,E_sapflow,group = grp), color = "grey20")+
-  annotate("text",x = lubridate::ymd("2014/01/01"),y = 7, label = "FRA FON")+
+  # annotate("text",x = lubridate::ymd("2014/01/01"),y = 7, label = "FRA FON")+
   ylab(expression(paste(E[modelled], " [mol ", m[ground]^{-2}, h^{-1},"]")))+
   theme_bw()+
   theme(strip.background = element_blank())
 
 
 df %>% 
-  filter(sensitivity_K == 1, 
-         sensitivity_psi == 1, 
-         model_type %in% c("pmodel_ecrit","pmodel", 'phydro',"sperry","wap","wang")) %>%
+  filter(#sensitivity_K == 1, 
+    #sensitivity_psi == 1, 
+    model_type %in% c("pmodel", 'phydro','phydro_wang',"sperry","wap","wang")) %>%  
   dplyr::select(TIMESTAMP, grp, model_type, E, E_sapflow,E_sapflow_sd) %>% 
   pivot_wider(names_from = model_type, values_from = E) %>% 
   # lm(pmodel~sperry,data=.) %>% summary()
@@ -173,16 +193,97 @@ df %>%
   theme_bw()+
   theme(strip.background = element_blank())
 
+
+df %>% 
+  filter(#sensitivity_K == 1, 
+    #sensitivity_psi == 1, 
+    model_type %in% c("pmodel", 'phydro','phydro_wang',"sperry","wap","wang")) %>%  
+  dplyr::select(TIMESTAMP, grp, model_type, E, E_sapflow,E_sapflow_sd) %>% 
+  pivot_wider(names_from = model_type, values_from = E) %>% 
+  # lm(pmodel~sperry,data=.) %>% summary()
+  filter(!is.na(phydro_wang), !is.na(phydro)) %>% 
+  mutate(dens = get_density(phydro_wang,phydro,n = 100)) %>% 
+  ggplot()+
+  geom_point(aes(phydro_wang,phydro,color = dens))+
+  scale_color_jcolors_contin(palette = "pal2",bias = 3)+
+  theme_bw()+
+  theme(strip.background = element_blank())
+
+df %>% 
+  filter(#sensitivity_K == 1, 
+    #sensitivity_psi == 1, 
+    model_type %in% c("pmodel", 'phydro','phydro_wang',"sperry","wap","wang")) %>%  
+  dplyr::select(TIMESTAMP, grp, model_type, E, E_sapflow,E_sapflow_sd) %>% 
+  pivot_wider(names_from = model_type, values_from = E) %>% 
+  # lm(pmodel~sperry,data=.) %>% summary()
+  filter(!is.na(pmodel), !is.na(phydro_wang)) %>% 
+  mutate(dens = get_density(pmodel,phydro_wang,n = 100)) %>% 
+  ggplot()+
+  geom_point(aes(pmodel,phydro_wang,color = dens))+
+  scale_color_jcolors_contin(palette = "pal2",bias = 3)+
+  theme_bw()+
+  theme(strip.background = element_blank())
+
+
+#Gs
+df %>% 
+  filter(#sensitivity_K == 1, 
+    #sensitivity_psi == 1, 
+    model_type %in% c("pmodel", 'phydro','phydro_wang',"sperry","wap","wang")) %>%  
+  dplyr::select(TIMESTAMP, grp, model_type, gs, Gs_sapflow,Gs_sapflow_sd) %>% 
+  pivot_wider(names_from = model_type, values_from = gs) %>% 
+  # lm(pmodel~sperry,data=.) %>% summary()
+  filter(!is.na(pmodel), !is.na(phydro)) %>% 
+  mutate(dens = get_density(pmodel,phydro,n = 100)) %>% 
+  ggplot()+
+  geom_point(aes(pmodel,phydro,color = dens))+
+  scale_color_jcolors_contin(palette = "pal2",bias = 3)+
+  theme_bw()+
+  theme(strip.background = element_blank())
+
+
+df %>% 
+  filter(#sensitivity_K == 1, 
+    #sensitivity_psi == 1, 
+    model_type %in% c("pmodel", 'phydro','phydro_wang',"sperry","wap","wang")) %>%  
+  dplyr::select(TIMESTAMP, grp, model_type, gs, Gs_sapflow,Gs_sapflow_sd) %>% 
+  pivot_wider(names_from = model_type, values_from = gs) %>% 
+  # lm(pmodel~sperry,data=.) %>% summary()
+  filter(!is.na(phydro_wang), !is.na(phydro)) %>% 
+  mutate(dens = get_density(phydro_wang,phydro,n = 100)) %>% 
+  ggplot()+
+  geom_point(aes(phydro_wang,phydro,color = dens))+
+  scale_color_jcolors_contin(palette = "pal2",bias = 3)+
+  theme_bw()+
+  theme(strip.background = element_blank())
+
+df %>% 
+  filter(#sensitivity_K == 1, 
+    #sensitivity_psi == 1, 
+    model_type %in% c("pmodel", 'phydro','phydro_wang',"sperry","wap","wang")) %>%  
+  dplyr::select(TIMESTAMP, grp, model_type, gs, Gs_sapflow,Gs_sapflow_sd) %>% 
+  pivot_wider(names_from = model_type, values_from = gs) %>% 
+  # lm(pmodel~sperry,data=.) %>% summary()
+  filter(!is.na(pmodel), !is.na(phydro_wang)) %>% 
+  mutate(dens = get_density(pmodel,phydro_wang,n = 100)) %>% 
+  ggplot()+
+  geom_point(aes(pmodel,phydro_wang,color = dens))+
+  scale_color_jcolors_contin(palette = "pal2",bias = 3)+
+  theme_bw()+
+  theme(strip.background = element_blank())
+
+
 #### E vs E modelled ####
 
-mod_E_E <- lmer(E_sapflow~E*model_type+(1|si_code), data = df%>% 
-                  filter(sensitivity_K == 1, sensitivity_psi == 1))
+mod_E_E <- lmer(E_sapflow~E*model_type+(1|si_code), data = df#%>% 
+                  # filter(sensitivity_K == 1, sensitivity_psi == 1)
+                  )
 summary(mod_E_E)
 
 emt1 <- emtrends(mod_E_E, "model_type", var = "E") %>%
   as_tibble() %>% 
   rename(trend = `E.trend`) %>% 
-  mutate(model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG")),
+  mutate(model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG")),
          trend = format(round(trend, 3), nsmall = 3),
          trend = paste("beta"," == ", trend)) %>% 
   cbind(E = 45, E_sapflow =29)
@@ -190,27 +291,29 @@ emt1
 
 
 mod_E_E_log <- lmer(log_E_sapflow~log_E*model_type+(1|si_code), data = df%>% 
-                filter(sensitivity_K == 1, sensitivity_psi == 1) %>% mutate(log_E = log(E), log_E_sapflow = log(E_sapflow)))
+                # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+                  mutate(log_E = log(E), log_E_sapflow = log(E_sapflow)))
 summary(mod_E_E)
 
 emt2 <- emtrends(mod_E_E_log, "model_type", var = "log_E")%>%
   as_tibble() %>% 
   rename(trend = `log_E.trend`) %>% 
-  mutate(model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG")),
+  mutate(model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG")),
          trend = format(round(trend, 3), nsmall = 3),
          trend = paste("beta"," == ", trend)) %>% 
   cbind(E = 0.01, E_sapflow =0.00001)
 emt2         
 
 
-mod_E_E_rel <- lmer(E_sapflow_rel~E_rel*model_type+(1|si_code), data = df%>% 
-                      filter(sensitivity_K == 1, sensitivity_psi == 1))
+mod_E_E_rel <- lmer(E_sapflow_rel~E_rel*model_type+(1|si_code), data = df#%>% 
+                      # filter(sensitivity_K == 1, sensitivity_psi == 1)
+                    )
 summary(mod_E_E_rel)
 
 emt3 <- emtrends(mod_E_E_rel, "model_type", var = "E_rel")%>%
   as_tibble() %>% 
   rename(trend = `E_rel.trend`) %>% 
-  mutate(model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG")),
+  mutate(model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG")),
          trend = format(round(trend, 3), nsmall = 3),
          trend = paste("beta"," == ", trend)) %>% 
   cbind(E_rel = 0.5, E_sapflow_rel =0.85)
@@ -218,12 +321,12 @@ emt3
 
 
 p1 <- df %>%
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   group_by(model_type) %>% 
   mutate(log_E = log(E),
          log_E_sapflow = log(E_sapflow),
          dens = get_density(E,E_sapflow,n = 100),
-         model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
+         model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
   ggplot(aes(E, E_sapflow, group = model_type))+
   geom_point(aes(color = dens),show.legend = FALSE)+
   geom_abline(intercept = 0, slope = 1, linetype = 2)+
@@ -237,12 +340,12 @@ p1 <- df %>%
   theme(strip.background = element_blank())
 
 p2 <- df %>%
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   group_by(model_type) %>% 
   mutate(log_E = log(E),
          log_E_sapflow = log(E_sapflow),
          dens = get_density(log_E,log_E_sapflow,n = 100),
-         model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
+         model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
   ggplot(aes(log(E), log(E_sapflow), group = model_type))+
   geom_point(aes(color = dens),show.legend = FALSE)+
   geom_abline(intercept = 0, slope = 1, linetype = 2)+
@@ -256,10 +359,10 @@ p2 <- df %>%
   theme(strip.background = element_blank())
 
 p3 <- df %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   group_by(model_type) %>% 
   mutate(dens = get_density(E_rel,E_sapflow_rel,n = 200),
-         model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>%  
+         model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>%  
   ggplot(aes(E_rel*100, E_sapflow_rel*100, group = model_type))+
   geom_point(aes(color = dens),show.legend = FALSE)+
   geom_abline(intercept = 0, slope = 1, linetype = 2)+
@@ -282,7 +385,7 @@ ggpubr::ggarrange(p1,p2,p3,
 #   filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
 #   group_by(model_type) %>% 
 #   mutate(dens = get_density(swvl,E_dif,n = 200),
-#          model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
+#          model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
 #   ggplot(aes(swvl, E_dif, group = model_type))+
 #   geom_point(aes(color = dens),show.legend = FALSE)+
 #   geom_abline(intercept = 0, slope = 0, linetype = 2)+
@@ -298,7 +401,7 @@ ggpubr::ggarrange(p1,p2,p3,
 #   filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
 #   group_by(model_type) %>% 
 #   mutate(dens = get_density(swvl,E_dif_rel,n = 200),
-#          model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
+#          model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
 #   ggplot(aes(swvl, E_dif_rel*100, group = model_type))+
 #   geom_point(aes(color = dens),show.legend = FALSE)+
 #   geom_abline(intercept = 0, slope = 0, linetype = 2)+
@@ -313,56 +416,58 @@ ggpubr::ggarrange(p1,p2,p3,
 
 #### SOIL PSI all data ####
 
-mod_E_psi <- lmer((E-E_sapflow)~log_psi*model_type+(1|si_code), data = df%>% 
-                  filter(sensitivity_K == 1, sensitivity_psi == 1))
-summary(mod_E_psi)
+mod_gs_psi <- lmer((gs-Gs_sapflow)~log_psi*model_type+(1|si_code), data = df#%>% 
+                  # filter(sensitivity_K == 1, sensitivity_psi == 1)
+                  )
+summary(mod_gs_psi)
 
-emt1 <- emtrends(mod_E_psi, "model_type", var = "log_psi") %>%
+emt1 <- emtrends(mod_gs_psi, "model_type", var = "log_psi") %>%
   as_tibble() %>% 
   rename(trend = `log_psi.trend`) %>% 
-  mutate(model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG")),
+  mutate(model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG")),
          trend = format(round(trend, 3), nsmall = 3),
          trend = paste("beta"," == ", trend)) %>% 
   cbind(E = 45, E_sapflow =29)
 emt1         
 
 
-mod_E_psi_rel <- lmer((E_rel-E_sapflow_rel)~log_psi*model_type+(1|si_code), data = df%>% 
-                    filter(sensitivity_K == 1, sensitivity_psi == 1))
-summary(mod_E_psi_rel)
+mod_gs_psi_rel <- lmer((gs_rel-Gs_sapflow_rel)~log_psi*model_type+(1|si_code), data = df#%>% 
+                    # filter(sensitivity_K == 1, sensitivity_psi == 1)
+                    )
+summary(mod_gs_psi_rel)
 
-emt2 <- emtrends(mod_E_psi_rel, "model_type", var = "log_psi") %>%
+emt2 <- emtrends(mod_gs_psi_rel, "model_type", var = "log_psi") %>%
   as_tibble() %>% 
   rename(trend = `log_psi.trend`) %>% 
-  mutate(model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG")),
+  mutate(model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG")),
          trend = format(round(trend, 3), nsmall = 3),
          trend = paste("beta"," == ", trend)) %>% 
   cbind(E = 45, E_sapflow =29)
 emt2 
 
 df %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   group_by(model_type) %>% 
   filter(!is.na(log_psi)) %>% 
-  mutate(dens = get_density(log_psi,E_dif,n = 200),
-         model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
-  ggplot(aes(log_psi, E_dif, group = model_type))+
+  mutate(dens = get_density(log_psi,gs_dif,n = 200),
+         model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
+  ggplot(aes(log_psi, gs_dif, group = model_type))+
   geom_point(aes(color = dens),show.legend = FALSE)+
   geom_abline(intercept = 0, slope = 0, linetype = 2)+
   geom_smooth(method= "lm", color = ghibli_pal[[3]])+
   facet_wrap(. ~ model_type)+
   scale_color_jcolors_contin(palette = "pal2",bias = 2)+
-  ylab(expression(paste(E[modelled], " - ", E[actual], " [", mol," ", m[soil]^{-2}," ", h^{-1},"]")))+
+  ylab(expression(paste(G[modelled], " - ", G[actual], " [", mol," ", m[soil]^{-2}," ", h^{-1},"]")))+
   xlab(expression(paste("log(|",psi[soil],"|)")))+
   theme_bw()+
   theme(strip.background = element_blank())
 
 df %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   group_by(model_type) %>%
   filter(!is.na(log_psi)) %>%
   mutate(dens = get_density(log_psi,E_dif_rel,n = 200),
-         model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
+         model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
   ggplot(aes(log_psi, E_dif_rel*100, group = model_type))+
   geom_point(aes(color = dens),show.legend = FALSE)+
   geom_abline(intercept = 0, slope = 0, linetype = 2)+
@@ -379,7 +484,7 @@ df %>%
 #   group_by(model_type) %>% 
 #   filter(!is.na(log_psi)) %>% 
 #   mutate(dens = get_density(psi_soil,E_dif,n = 200),
-#          model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
+#          model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
 #   ggplot(aes(psi_soil, E_dif, group = model_type))+
 #   geom_point(aes(color = dens),show.legend = FALSE)+
 #   geom_abline(intercept = 0, slope = 0, linetype = 2)+
@@ -396,7 +501,7 @@ df %>%
 #   group_by(model_type) %>%
 #   filter(!is.na(log_psi)) %>%
 #   mutate(dens = get_density(log_psi,E_dif_rel,n = 200),
-#          model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
+#          model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
 #   ggplot(aes(log_psi, E_dif_rel*100, group = model_type))+
 #   geom_point(aes(color = dens),show.legend = FALSE)+
 #   geom_abline(intercept = 0, slope = 0, linetype = 2)+
@@ -410,10 +515,10 @@ df %>%
 
 #### VPD all data ####
 df %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   group_by(model_type) %>% 
   mutate(dens = get_density(vpd,E_dif,n = 200),
-         model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
+         model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
   ggplot(aes(log(vpd), E_dif, group = model_type))+
   geom_point(aes(color = dens), show.legend = FALSE)+
   geom_abline(intercept = 0, slope = 0, linetype = 2)+
@@ -426,10 +531,10 @@ df %>%
   theme(strip.background = element_blank())
 
 df %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   group_by(model_type) %>% 
   mutate(dens = get_density(vpd,E_dif_rel,n = 200),
-         model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
+         model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
   ggplot(aes(log(vpd), E_dif_rel*100, group = model_type))+
   geom_point(aes(color = dens), show.legend = FALSE)+
   geom_abline(intercept = 0, slope = 0, linetype = 2)+
@@ -444,10 +549,11 @@ df %>%
 
 #### PPFD all data ####
 df %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1, ppfd_in<1100) %>% 
+  filter(#sensitivity_K == 1, sensitivity_psi == 1, 
+    ppfd_in<1100) %>%
   group_by(model_type) %>% 
   mutate(dens = get_density(ppfd_in,E_dif,n = 200),
-         model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
+         model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
   ggplot(aes(ppfd_in, E_dif, group = model_type))+
   geom_point(aes(color = dens), show.legend = FALSE)+
   geom_abline(intercept = 0, slope = 0, linetype = 2)+
@@ -460,10 +566,11 @@ df %>%
   theme(strip.background = element_blank())
 
 df %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1, ppfd_in<1100) %>% 
+  filter(#sensitivity_K == 1, sensitivity_psi == 1, 
+         ppfd_in<1100) %>% 
   group_by(model_type) %>% 
   mutate(dens = get_density(ppfd_in,E_dif_rel,n = 200),
-         model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
+         model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
   ggplot(aes(ppfd_in, E_dif_rel*100, group = model_type))+
   geom_point(aes(color = dens), show.legend = FALSE)+
   geom_abline(intercept = 0, slope = 0, linetype = 2)+
@@ -478,10 +585,10 @@ df %>%
 
 #### Temperature all data ####
 df %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   group_by(model_type) %>% 
   mutate(dens = get_density(ta,E_dif,n = 200),
-         model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
+         model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
   ggplot(aes(ta, E_dif, group = model_type))+
   geom_point(aes(color = dens), show.legend = FALSE)+
   geom_abline(intercept = 0, slope = 0, linetype = 2)+
@@ -494,10 +601,10 @@ df %>%
   theme(strip.background = element_blank())
 
 df %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   group_by(model_type) %>% 
   mutate(dens = get_density(ta,E_dif_rel,n = 200),
-         model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>%
+         model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>%
   ggplot(aes(ta, E_dif_rel*100, group = model_type))+
   geom_point(aes(color = dens), show.legend = FALSE)+
   geom_abline(intercept = 0, slope = 0, linetype = 2)+
@@ -511,10 +618,10 @@ df %>%
 
 #### LAI all data ####
 df %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   group_by(model_type) %>% 
   mutate(dens = get_density(LAI,E_dif,n = 200),
-         model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
+         model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
   ggplot(aes(LAI, E_dif, group = model_type))+
   geom_point(aes(color = dens), show.legend = FALSE)+
   geom_abline(intercept = 0, slope = 0, linetype = 2)+
@@ -527,10 +634,10 @@ df %>%
   theme(strip.background = element_blank())
 
 df %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   group_by(model_type) %>% 
   mutate(dens = get_density(LAI,E_dif_rel,n = 200),
-         model_type = factor(model_type, c("pmodel","pmodel_ecrit","phydro","sperry","wap", "wang"), c("PMODEL", "PMODEL ECRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
+         model_type = factor(model_type, c("pmodel","phydro_wang","phydro","sperry","wap", "wang"), c("PMODEL", "PHYDRO CRIT", "PHYDRO", "SPERRY", "WAP", "WANG"))) %>% 
   ggplot(aes(LAI, E_dif_rel*100, group = model_type))+
   geom_point(aes(color = dens), show.legend = FALSE)+
   geom_abline(intercept = 0, slope = 0, linetype = 2)+
@@ -553,12 +660,12 @@ summary(model_pmodel)
 MuMIn::r.squaredGLMM(model_pmodel)
 
 
-model_pmodel_swc <- lmer(log(E_sapflow) ~ log(E)*(swvl+log(vpd)+ppfd_in+ta+LAI)+(1|si_code), 
-                     data = df %>% filter(model_type == "pmodel_swc") %>% mutate(ppfd_in = ppfd_in/1000 ))
-model_pmodel_swc <- lmer(E_dif ~ swvl+log(vpd)+ppfd_in+ta + (1|si_code), 
-                         data = df %>% filter(model_type == "pmodel_swc") %>% mutate(ppfd_in = ppfd_in/1000 ))
-summary(model_pmodel_swc)
-MuMIn::r.squaredGLMM(model_pmodel_swc)
+model_phydro_wang <- lmer(log(E_sapflow) ~ log(E)*(swvl+log(vpd)+ppfd_in+ta+LAI)+(1|si_code),
+                     data = df %>% filter(model_type == "phydro_wang") %>% mutate(ppfd_in = ppfd_in/1000 ))
+model_phydro_wang <- lmer(E_dif ~ swvl+log(vpd)+ppfd_in+ta + (1|si_code),
+                         data = df %>% filter(model_type == "phydro_wang") %>% mutate(ppfd_in = ppfd_in/1000 ))
+summary(model_phydro_wang)
+MuMIn::r.squaredGLMM(model_phydro_wang)
 
 
 model_phydro <- lmer(log(E_sapflow) ~ log(E)*(swvl+log(vpd)+ppfd_in+ta+LAI)+(1|si_code), 
@@ -611,7 +718,7 @@ MuMIn::r.squaredGLMM(model_wap)
 
 #### MAP ####
 df_summary %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   ggplot(aes(x=si_map, y = cor_value, color = model_type, weight = n))+
   geom_point(aes(size = n), show.legend = FALSE)+
   geom_smooth(method = "lm", se = FALSE)+
@@ -622,7 +729,7 @@ df_summary %>%
   theme_bw()
 
 df_summary %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   ggplot(aes(x=si_map, y = r.squared, color = model_type, weight = n))+
   geom_point(aes(size = n), show.legend = FALSE)+
   geom_smooth(method = "lm", se = FALSE)+
@@ -633,7 +740,7 @@ df_summary %>%
   theme_bw()
 
 df_summary %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   ggplot(aes(x=si_map, y = bias, color = model_type, weight = n))+
   geom_point(aes(size = n), show.legend = FALSE)+
   geom_smooth(method = "lm", se = FALSE)+
@@ -644,7 +751,7 @@ df_summary %>%
   theme_bw()
 
 df_summary %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   ggplot(aes(x=si_map, y = rmse, color = model_type, weight = n))+
   geom_point(aes(size = n), show.legend = FALSE)+
   geom_smooth(method = "lm", se = FALSE)+
@@ -655,7 +762,7 @@ df_summary %>%
   theme_bw()
 
 df_summary %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   ggplot(aes(x=si_map, y = mae, color = model_type, weight = n))+
   geom_point(aes(size = n), show.legend = FALSE)+
   geom_smooth(method = "lm", se = FALSE)+
@@ -669,7 +776,7 @@ df_summary %>%
 
 #### MAT ####
 df_summary %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   ggplot(aes(x=si_mat, y = cor_value, color = model_type, weight = n))+
   geom_point(aes(size = n), show.legend = FALSE)+
   geom_smooth(method = "lm", se = FALSE)+
@@ -680,7 +787,7 @@ df_summary %>%
   theme_bw()
 
 df_summary %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   ggplot(aes(x=si_mat, y = r.squared, color = model_type, weight = n))+
   geom_point(aes(size = n), show.legend = FALSE)+
   geom_smooth(method = "lm", se = FALSE)+
@@ -691,7 +798,7 @@ df_summary %>%
   theme_bw()
 
 df_summary %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   ggplot(aes(x=si_mat, y = bias, color = model_type, weight = n))+
   geom_point(aes(size = n), show.legend = FALSE)+
   geom_smooth(method = "lm", se = FALSE)+
@@ -702,7 +809,7 @@ df_summary %>%
   theme_bw()
 
 df_summary %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   ggplot(aes(x=si_mat, y = rmse, color = model_type, weight = n))+
   geom_point(aes(size = n), show.legend = FALSE)+
   geom_smooth(method = "lm", se = FALSE)+
@@ -713,7 +820,7 @@ df_summary %>%
   theme_bw()
 
 df_summary %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   ggplot(aes(x=si_mat, y = mae, color = model_type, weight = n))+
   geom_point(aes(size = n), show.legend = FALSE)+
   geom_smooth(method = "lm", se = FALSE)+
@@ -726,7 +833,7 @@ df_summary %>%
 
 #### ELEVATION ####
 df_summary %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   ggplot(aes(x=si_elev, y = cor_value, color = model_type, weight = n))+
   geom_point(aes(size = n), show.legend = FALSE)+
   geom_smooth(method = "lm", se = FALSE)+
@@ -737,7 +844,7 @@ df_summary %>%
   theme_bw()
 
 df_summary %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   ggplot(aes(x=si_elev, y = r.squared, color = model_type, weight = n))+
   geom_point(aes(size = n), show.legend = FALSE)+
   geom_smooth(method = "lm", se = FALSE)+
@@ -748,7 +855,7 @@ df_summary %>%
   theme_bw()
 
 df_summary %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   ggplot(aes(x=si_elev, y = bias, color = model_type, weight = n))+
   geom_point(aes(size = n), show.legend = FALSE)+
   geom_smooth(method = "lm", se = FALSE)+
@@ -759,7 +866,7 @@ df_summary %>%
   theme_bw()
 
 df_summary %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   ggplot(aes(x=si_elev, y = rmse, color = model_type, weight = n))+
   geom_point(aes(size = n), show.legend = FALSE)+
   geom_smooth(method = "lm", se = FALSE)+
@@ -770,7 +877,7 @@ df_summary %>%
   theme_bw()
 
 df_summary %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   ggplot(aes(x=si_elev, y = mae, color = model_type, weight = n))+
   geom_point(aes(size = n), show.legend = FALSE)+
   geom_smooth(method = "lm", se = FALSE)+
@@ -782,7 +889,7 @@ df_summary %>%
 
 #### VPD AVERAGE ####
 df_summary %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   ggplot(aes(x=VPD, y = cor_value, color = model_type, weight = n))+
   geom_point(aes(size = n), show.legend = FALSE)+
   geom_smooth(method = "lm", se = FALSE)+
@@ -793,7 +900,7 @@ df_summary %>%
   theme_bw()
 
 df_summary %>% 
-  filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
+  # filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   ggplot(aes(x=VPD, y = r.squared, color = model_type, weight = n))+
   geom_point(aes(size = n), show.legend = FALSE)+
   geom_smooth(method = "lm", se = FALSE)+
@@ -1530,26 +1637,26 @@ caret::varImp(model_pmodel)
 
 
 #PMODEL Ecrit
-model_pmodel_ecrit <- lm(bias ~ si_map * si_mat + si_elev + clay + sand + ppfd + LAI + height, 
-                   data = df_summary %>% filter(model_type == "pmodel_ecrit",sensitivity_K == 1, sensitivity_psi == 1), weights = n)
-summary(model_pmodel_ecrit)
-step(model_pmodel_ecrit) %>% summary()
+model_phydro_wang <- lm(bias ~ si_map * si_mat + si_elev + clay + sand + ppfd + LAI + height, 
+                   data = df_summary %>% filter(model_type == "phydro_wang",sensitivity_K == 1, sensitivity_psi == 1), weights = n)
+summary(model_phydro_wang)
+step(model_phydro_wang) %>% summary()
 
-model_pmodel_ecrit <- lm(cor_value ~ si_map * si_mat + si_elev + clay + sand + ppfd + LAI + height,
-                   data = df_summary %>% filter(model_type == "pmodel_ecrit",sensitivity_K == 1, sensitivity_psi == 1), weights = n)
-summary(model_pmodel_ecrit)
-step(model_pmodel_ecrit) %>% summary()
+model_phydro_wang <- lm(cor_value ~ si_map * si_mat + si_elev + clay + sand + ppfd + LAI + height,
+                   data = df_summary %>% filter(model_type == "phydro_wang",sensitivity_K == 1, sensitivity_psi == 1), weights = n)
+summary(model_phydro_wang)
+step(model_phydro_wang) %>% summary()
 
-model_pmodel_ecrit <- lm(r.squared ~ si_map * si_mat + si_elev + clay + sand + ppfd + LAI + height, 
-                   data = df_summary %>% filter(model_type == "pmodel_ecrit",sensitivity_K == 1, sensitivity_psi == 1), weights = n)
-summary(model_pmodel_ecrit)
-step(model_pmodel_ecrit) %>% summary()
+model_phydro_wang <- lm(r.squared ~ si_map * si_mat + si_elev + clay + sand + ppfd + LAI + height, 
+                   data = df_summary %>% filter(model_type == "phydro_wang",sensitivity_K == 1, sensitivity_psi == 1), weights = n)
+summary(model_phydro_wang)
+step(model_phydro_wang) %>% summary()
 
-model_pmodel_ecrit <- lm(rmse ~ si_map * si_mat + si_elev + clay + sand + ppfd + LAI + height,
-                   data = df_summary %>% filter(model_type == "pmodel_ecrit",sensitivity_K == 1, sensitivity_psi == 1), weights = n)
-summary(model_pmodel_ecrit)
-step(model_pmodel_ecrit) %>% summary()
-caret::varImp(model_pmodel_ecrit)
+model_phydro_wang <- lm(rmse ~ si_map * si_mat + si_elev + clay + sand + ppfd + LAI + height,
+                   data = df_summary %>% filter(model_type == "phydro_wang",sensitivity_K == 1, sensitivity_psi == 1), weights = n)
+summary(model_phydro_wang)
+step(model_phydro_wang) %>% summary()
+caret::varImp(model_phydro_wang)
 
 
 #Sperry
@@ -1772,7 +1879,7 @@ df_summary %>% left_join(sensitivity_references) %>%
 df %>%
   filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   group_by(model_type) %>% 
-  filter(model_type %in% c("pmodel","pmodel_ecrit")) %>% 
+  filter(model_type %in% c("pmodel","phydro_wang")) %>% 
   mutate(dens = get_density(gpp,E,n = 100)) %>% 
   ggplot(aes(E, gpp, group = model_type))+
   geom_point(aes(color = dens), show.legend = FALSE)+
@@ -1788,7 +1895,7 @@ df %>%
 df %>%
   filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   group_by(model_type) %>% 
-  filter(model_type %in% c("pmodel","pmodel_ecrit")) %>% 
+  filter(model_type %in% c("pmodel","phydro_wang")) %>% 
   mutate(dens = get_density(gpp,swvl,n = 100)) %>% 
   ggplot(aes(swvl, gpp, group = model_type))+
   geom_point(aes(color = dens), show.legend = FALSE)+
@@ -1806,7 +1913,7 @@ df %>%
   filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   group_by(model_type) %>% 
   filter(gpp_all >= 0, gpp_all<200) %>% 
-  # filter(model_type %in% c("pmodel","pmodel_ecrit")) %>% 
+  # filter(model_type %in% c("pmodel","phydro_wang")) %>% 
   mutate(dens = get_density(gpp_all,E,n = 100)) %>% 
   ggplot(aes(E, gpp_all, group = model_type))+
   geom_point(aes(color = dens), show.legend = FALSE)+
@@ -1822,7 +1929,7 @@ df %>%
   filter(sensitivity_K == 1, sensitivity_psi == 1) %>% 
   group_by(model_type) %>% 
   filter(gpp_all >= 0, gpp_all<200) %>% 
-  # filter(model_type %in% c("pmodel","pmodel_ecrit")) %>% 
+  # filter(model_type %in% c("pmodel","phydro_wang")) %>% 
   mutate(dens = get_density(gpp_all,swvl,n = 100)) %>% 
   ggplot(aes(swvl, gpp_all, group = model_type))+
   geom_point(aes(color = dens), show.legend = FALSE)+
@@ -1845,7 +1952,7 @@ df %>%
   group_by(model_type) %>% 
   summarise(psi_l = mean(psi_l, na.rm = TRUE))
   filter(psi_soil <= 0, psi_l <= 0, !is.na(psi_soil), !is.na(psi_l)) %>% 
-  # filter(model_type %in% c("pmodel","pmodel_ecrit")) %>% 
+  # filter(model_type %in% c("pmodel","phydro_wang")) %>% 
   # mutate(dens = get_density(psi_l,psi_soil,n = 100)) %>% 
   ggplot(aes(psi_soil, psi_l, group = model_type))+
   geom_point(aes(color = dens), show.legend = FALSE)+
