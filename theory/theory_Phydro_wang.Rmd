@@ -27,6 +27,8 @@ $$
 
 ```{r, echo = FALSE, include = FALSE, message = FALSE}
 source("stomatal_optimization_functions.R")
+source('hydraulic_functions.R')
+source('photosynthetic_functions.R')
 library(tidyverse)
 library(rpmodel)
 
@@ -131,9 +133,11 @@ optimise_stomata_phydro_test <- function(fn_profit, psi_soil, par_cost, e_crit, 
                                          par_plant, par_env, jmax_lim, return_all = FALSE, do_optim=TRUE, opt_hypothesis){
   if(is.null(jmax_lim)){jmax_lim = 7}
   
+  par_gr = 10^-8 + 1e-5*(psi_soil-p_crit)^3
+  
   out_optim <- optimr::optimr(
-    par            = c(logjmax=0, dpsi=(psi_soil-p_crit)/2),  
-    lower          = c(-10, -psi_soil),
+    par            = c(logjmax=0, dpsi=-psi_soil+0.0001),  
+    lower          = c(-10, -psi_soil+0.00001),
     upper          = c(jmax_lim, -p_crit),
     fn             = fn_profit,
     psi_soil       = psi_soil,
@@ -145,7 +149,7 @@ optimise_stomata_phydro_test <- function(fn_profit, psi_soil, par_cost, e_crit, 
     do_optim       = do_optim,
     opt_hypothesis = opt_hypothesis,
     method         = "L-BFGS-B",
-    control        = list(maxit = 500, maximize = TRUE, fnscale = 1e6)
+    control        = list(maxit = 500, maximize = TRUE, parscale = c(1e-1,par_gr))
   )
   
   out_optim$value <- -out_optim$value
@@ -196,7 +200,7 @@ calc_phydro_wang_test <- function(tc, ppfd, vpd, co2, elv, LAI, fapar, kphio, ps
     }
 
   lj_dps_lim = optimise_stomata_phydro_test(fn_profit_phydro_wang_test, 
-                                     psi_soil = 0, 
+                                     psi_soil = -0.33, 
                                      e_crit = e_crit_jmax_lim,
                                      p_crit= p_crit,
                                      par_cost  = par_cost, 
@@ -206,6 +210,7 @@ calc_phydro_wang_test <- function(tc, ppfd, vpd, co2, elv, LAI, fapar, kphio, ps
                                      jmax_lim = NULL,
                                      opt_hypothesis = "PM")
   jmax_lim  = exp(lj_dps_lim[1]) %>% unname()
+
   
     # 3. Optimizer
   lj_dps = optimise_stomata_phydro_test(fn_profit_phydro_wang_test, 

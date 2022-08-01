@@ -20,13 +20,23 @@ library(gridExtra)
 library(scales)
 ```
 
-The following is a proposal to remove the $\gamma$ parameter from P Hydro and modify the hydraulic cost. In this approach we use the method of Sperry et al. 2016
+The ProfitMax stomatal scheme (Sperry et al. 2016) is obtimised as:
+$$
+F_{ProfitMax} = \frac{A_j}{A_{max}} -  (\frac{k_\mathrm{\psi_s}-k_\mathrm{\psi_l}}{k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}})
+$$
+The profit maximization can be rewritten as:
+$$
+F_{ProfitMax} = A_j - A_{max} (\frac{k_\mathrm{\psi_s}-k_\mathrm{\psi_l}}{k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}})
+$$
+Then we can easily account for photosynthetic cost:
 $$
 F = A_j - A_{max} (\frac{k_\mathrm{\psi_s}-k_\mathrm{\psi_l}}{k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}}) - \alpha J_\mathrm{max}
 $$
 
 ```{r, echo = FALSE, include = FALSE, message = FALSE}
 source("stomatal_optimization_functions.R")
+source('hydraulic_functions.R')
+source('photosynthetic_functions.R')
 library(tidyverse)
 library(rpmodel)
 
@@ -159,7 +169,7 @@ optimise_stomata_phydro_test <- function(fn_profit, psi_soil, par_cost, e_crit, 
   
   out_optim <- optimr::optimr(
     par            = c(logjmax=0, dpsi=(psi_soil-p_crit)/2),  
-    lower          = c(-10, -psi_soil),
+    lower          = c(-10, -psi_soil+0.0001),
     upper          = c(jmax_lim, -p_crit),
     fn             = fn_profit,
     psi_soil       = psi_soil,
@@ -221,17 +231,17 @@ calc_phydro_sperry_test <- function(tc, ppfd, vpd, co2, elv, LAI, fapar, kphio, 
       print("WARNING: soil water potential is lower than critical plant water potential.")
     }
 
-  lj_dps_lim = optimise_stomata_phydro_test(fn_profit_phydro_sperry_test, 
-                                     psi_soil = 0, 
-                                     e_crit = e_crit_jmax_lim,
-                                     p_crit= p_crit,
-                                     par_cost  = par_cost, 
-                                     par_photosynth = par_photosynth, 
-                                     par_plant = par_plant, 
-                                     par_env = par_env, 
-                                     jmax_lim = NULL,
-                                     opt_hypothesis = "PM")
-  jmax_lim  = exp(lj_dps_lim[1]) %>% unname()
+  # lj_dps_lim = optimise_stomata_phydro_test(fn_profit_phydro_sperry_test, 
+  #                                    psi_soil = 0, 
+  #                                    e_crit = e_crit_jmax_lim,
+  #                                    p_crit= p_crit,
+  #                                    par_cost  = par_cost, 
+  #                                    par_photosynth = par_photosynth, 
+  #                                    par_plant = par_plant, 
+  #                                    par_env = par_env, 
+  #                                    jmax_lim = NULL,
+  #                                    opt_hypothesis = "PM")
+  # jmax_lim  = exp(lj_dps_lim[1]) %>% unname()
   
     # 3. Optimizer
   lj_dps = optimise_stomata_phydro_test(fn_profit_phydro_sperry_test, 
@@ -242,7 +252,7 @@ calc_phydro_sperry_test <- function(tc, ppfd, vpd, co2, elv, LAI, fapar, kphio, 
                                      par_photosynth = par_photosynth, 
                                      par_plant = par_plant, 
                                      par_env = par_env,
-                                     jmax_lim = log(jmax_lim),
+                                     jmax_lim = NULL,
                                      opt_hypothesis = "PM")
 
     jmax  = exp(lj_dps[1]) %>% unname()
@@ -266,7 +276,7 @@ calc_phydro_sperry_test <- function(tc, ppfd, vpd, co2, elv, LAI, fapar, kphio, 
       ci           = ci,
       chi          = ci/par_photosynth$ca,
       vcmax        = vcmax,
-      jmax_lim     = jmax_lim 
+      jmax_lim     = 0 
     ))
   }
 
@@ -348,7 +358,7 @@ df_res %>%
   geom_vline(aes(xintercept=df_res[which(df_res$out == df_res$out %>% max(na.rm = TRUE)),"dpsi"]), linetype = 2)+
   # geom_vline(aes(xintercept=df_res[which(df_res$out_nocost == df_res$out_nocost %>% max(na.rm = TRUE)),"dpsi"]), linetype = 2, color = "red")+
   ylab("OUT")+
-  geom_text(x=3, y=-0.25, label="Example of Profit functions with VPD = 1 kPa, \n psi soil = -0.01 MPa and Jmax fixed",
+  geom_text(x=3, y=-4, label="Example of Profit functions with VPD = 1 kPa, \n psi soil = -0.01 MPa and Jmax fixed",
             family = "arial", fontface = "italic")+
   theme_classic()+
   # ylim(-0.5,0.5)+
@@ -357,27 +367,31 @@ df_res %>%
 
 ```
 
-The profit maximization can be rewritten as:
+Red line represents the profit optimization function of the original ProfitMax scheme. In yellow the proposed profit function. The upper blue line is the relative assimilation component and the lower is the normalized hydraulic penalization. The dashed vertical line represents the dpsi where the maximum profit is obtained.
+
+
+The components of the profit maximization function can be rewritten as:
 $$
-F = A_j (1-\frac{E}{E_\mathrm{crit}}) - \alpha J_\mathrm{max} (1-\frac{E}{E_\mathrm{crit}})
+A_j = g_\mathrm{s}  c_\mathrm{a} (1-\chi)
 $$
 
 
-and then
 $$
-F = g_\mathrm{s}  c_\mathrm{a} (1-\chi) (1-\frac{E}{E_\mathrm{crit}}) - \alpha J_\mathrm{max} (1-\frac{E}{E_\mathrm{crit}})
-$$
-
-$E$ can be calculated as the stand conductance ($K$) multiplied by the gradient between the soil and the leaf water potential.
-$$
-E = K (\psi_\mathrm{s} - \psi_\mathrm{l}) =  K \Delta\psi \;\;\;; \;\;\; \psi_\mathrm{l} = \psi_\mathrm{s}-\Delta\psi
+k_\mathrm{\psi_s} = K_{max}\;(\frac{1}{2})^{(\frac{\psi_s}{\psi_{50}})^b}
 $$
 
-Critical transpiration ($E_{crit}$) is equivalent to the maximum transpiration for a given soil potential, assuming no conductivity losses.
+
 $$
-E_\mathrm{crit} = K (\psi_\mathrm{s} - \psi_\mathrm{crit})
+k_\mathrm{\psi_l} = K_{max}\;(\frac{1}{2})^{(\frac{\psi_l}{\psi_{50}})^b} = K_{max}\;(\frac{1}{2})^{(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}
 $$
- This maximum transpiration is achieved when the gradient between soil $\psi_{s}$ and leaf $\psi_{l}$ water potential is maximum. That is, when the leaf potential is critical. Here we assume the critical leaf water potential as the potential at which 99.9% of conductivity loss would occur.
+
+$$
+k_\mathrm{\psi_{crit}} = K_{max}\;(\frac{1}{2})^{(\frac{\psi_{crit}}{\psi_{50}})^b}
+$$
+
+
+Where $\psi_{crit}$ is the critical leaf water potential as the potential at which 99.9% of conductivity loss would occur.
+
 $$
 P(\psi) = \frac{1}{2} ^{(\frac{\psi}{\psi_{50}})^b}
 $$
@@ -388,27 +402,25 @@ if\; P(\psi) = 0.001 \;  then: \; \psi_{crit} = \psi_{50}(\frac{ln(1000)}{ln(2)}
 $$
 
 
-
-We can write now the ($1-E/E_{crit}$) in terms of water potentials and differential of water potentials.
-$$
-(1-\frac{E}{E_\mathrm{crit}}) = 1 - \frac{ K (\psi_\mathrm{s} - \psi_\mathrm{l})}{K (\psi_\mathrm{s} - \psi_\mathrm{crit})} =
- \frac{ (\psi_\mathrm{l} - \psi_\mathrm{crit})}{ (\psi_\mathrm{s} - \psi_\mathrm{crit})} = 1-\frac{ \Delta\psi}{ (\psi_\mathrm{s} - \psi_\mathrm{crit})}
-$$
-
 Which gives us the next expression that can be solved similarly as in the P Hydro analytical approximation, where each term is a function of the two independent variables $\chi$ and $\Delta \psi$.
 $$
-F = g_\mathrm{s}  c_\mathrm{a} (1-\chi) ( 1-\frac{ \Delta\psi}{ (\psi_\mathrm{s} - \psi_\mathrm{crit})}) - \alpha J_\mathrm{max} ( 1-\frac{ \Delta\psi}{ (\psi_\mathrm{s} - \psi_\mathrm{crit})})
+F = g_\mathrm{s}  c_\mathrm{a} (1-\chi)- A_{max} (\frac{k_\mathrm{\psi_s}- K_{max}\;(\frac{1}{2})^{(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}}{k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}}) - \alpha J_\mathrm{max}
+$$
+
+or:
+$$
+F = g_\mathrm{s}  c_\mathrm{a} (1-\chi) (k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}})- A_{max} (k_\mathrm{\psi_s}- K_{max}\;(\frac{1}{2})^{(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}) - \alpha J_\mathrm{max} (k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}})
 $$
 
 Solved by $\chi$
 $$
-\frac{\partial F}{\partial \chi} = -g_s c_a( 1-\frac{ \Delta\psi}{ (\psi_\mathrm{s} - \psi_\mathrm{crit})}) -\alpha \frac{\partial J_\mathrm{max}}{\partial A_{Jm}} \frac{\partial A_{Jm}}{\partial \chi}( 1-\frac{ \Delta\psi}{ (\psi_\mathrm{s} - \psi_\mathrm{crit})}) = 0
+\frac{\partial F}{\partial \chi} = -g_s c_a(k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}) -\alpha \frac{\partial J_\mathrm{max}}{\partial A_{Jm}} \frac{\partial A_{Jm}}{\partial \chi}( k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}) = 0
 $$
 
 Solved by $\Delta\psi$
 $$
-\frac{\partial F}{\partial \Delta\psi} = \frac{\partial g_s}{\partial \Delta\psi} c_a (1-\chi) -(\Delta\psi\frac{\partial g_s}{\partial \Delta\psi}+g_s)(\frac{c_a (1-\chi)}{(\psi_\mathrm{s} - \psi_\mathrm{crit})})-
-\alpha \frac{\partial J_\mathrm{max}}{\partial A_{Jm}} \frac{\partial A_{Jm}}{\partial \Delta\psi}+(\Delta\psi\frac{\partial J_\mathrm{max}}{\partial A_{Jm}} \frac{\partial A_{Jm}}{\partial \Delta\psi}+J_\mathrm{max})(\frac{\alpha}{(\psi_\mathrm{s} - \psi_\mathrm{crit})}) = 0
+\frac{\partial F}{\partial \Delta\psi} = \frac{\partial g_s}{\partial \Delta\psi} c_a (1-\chi) (k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}})- \frac{A_{max}\;K_{max}\;ln(2)\;(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}{2\;(\Delta\psi + |\psi_s|)(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}-
+\alpha \frac{\partial J_\mathrm{max}}{\partial A_{Jm}} \frac{\partial A_{Jm}}{\partial \Delta\psi}(k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}})= 0
 $$
 
 
@@ -481,7 +493,7 @@ df_res2 %>%
   # geom_text(x=2, y=-10, label="Example of the Profit surface \n with VPD = 1 kPa, psi soil = -1.5 MPa",
   #           family = "arial", fontface = "italic")+
   theme_classic()+
-    ylim(-2,1.2)+
+    ylim(-2,1.3)+
   NULL -> f2
 
 
@@ -602,7 +614,7 @@ cowplot::plot_grid(f5,f6,f7,f8, labels = "auto")
 
 ```
 
-Notice that as the soil dries out, the maximum is less clear. In this approach, the leaf potential values cannot be lower than the critical value. This must be limited in some way in the optimisation. In the numerical version I have figured it out, but I don't know if it is possible to do the same analytically. We can also see that at a given $\psi_s$, optimisation will occur at higher values of $\Delta\psi$ with values of jmax tending to infinity. This implies that jmax should be limited. Would it make sense to set the upper limit of jmax to the value when $\psi_s$ = 0? (At the moment this is what I have done)
+
 
 ```{r echo=F}
 plot_all = function(df_w_vol, varname, ref=NULL){
