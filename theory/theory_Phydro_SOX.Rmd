@@ -1,5 +1,5 @@
 ---
-title: "The P Hydro model with sperry optimization"
+title: "The P Hydro model with sox optimization"
 author: "Victor Flo"
 date: "`r Sys.Date()`"
 output:
@@ -20,17 +20,14 @@ library(gridExtra)
 library(scales)
 ```
 
-The ProfitMax stomatal scheme (Sperry et al. 2016) is obtimised as:
+The SOX stomatal scheme (Eller et al. 2018) is obtimised as:
 $$
-F_{ProfitMax} = \frac{A_j}{A_{max}} -  (\frac{k_\mathrm{\psi_s}-k_\mathrm{\psi_l}}{k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}})
+F_{ProfitMax} = A_j  (\frac{k_\mathrm{\psi_l}-k_\mathrm{\psi_{crit}}}{k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}})
 $$
-The profit maximization can be rewritten as:
+
+Then, accounting for photosynthetic cost:
 $$
-F_{ProfitMax} = A_j - A_{max} (\frac{k_\mathrm{\psi_s}-k_\mathrm{\psi_l}}{k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}})
-$$
-Then we can easily account for photosynthetic cost:
-$$
-F = A_j - A_{max} (\frac{k_\mathrm{\psi_s}-k_\mathrm{\psi_l}}{k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}}) - \alpha J_\mathrm{max}
+F = A_j  (\frac{k_\mathrm{\psi_l}-k_\mathrm{\psi_{crit}}}{k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}}) - \alpha J_\mathrm{max}
 $$
 
 ```{r, echo = FALSE, include = FALSE, message = FALSE}
@@ -74,7 +71,8 @@ get_std_photosythnesis_params = function(){
   ))
 }
 
-fn_profit_phydro_sperry <- function(par, psi_soil, e_crit, par_cost, par_photosynth, par_plant, par_env, do_optim = FALSE, opt_hypothesis){
+fn_profit_phydro_sox <- function(par, psi_soil, e_crit, p_crit, par_cost, par_photosynth, 
+                                 par_plant, par_env, do_optim = FALSE, opt_hypothesis){
   
   jmax = exp(par[1])$logjmax  # Jmax in umol/m2/s (logjmax is supplied by the optimizer)
   dpsi = par[2]$dpsi       # delta Psi in MPa
@@ -88,30 +86,17 @@ fn_profit_phydro_sperry <- function(par, psi_soil, e_crit, par_cost, par_photosy
   a     = a_j$a
   ci    = a_j$ci
   vcmax = calc_vcmax_coordinated_numerical(a,ci, par_photosynth)
-    LAI        = par_env$LAI
-    K          = scale_conductivity_ks(par_plant$conductivity, par_env, par_plant, do_backtransform = FALSE)*LAI #mol m-2 (ground) s-1 MPa-1
-    d          = par_plant$d
-    c          = par_plant$c
-    list_a = vector("list", 200)
-    for(i in 1:200){
-      e   <- i * 0.005 * e_crit
-      g   <- e/(1.6*(par_env$vpd/par_env$patm)) #mol m-2 (ground) s-1
-      c_a <- calc_assimilation_limiting(vcmax, jmax, g, par_photosynth)
-      list_a[[i]] <- c_a$a
-    }
-    ks     = K*exp( -1.0 * (-psi_soil/-d)^c )
-    kl     = K*exp( -1.0 * (-psi_leaf/-d)^c )
-    k_crit = K*exp( -1.0 * (-p_crit/-d)^c )
-    risk   = (ks-kl)/(ks-k_crit)
-    cost   = (par_cost$alpha * jmax)
-    amax   = max(unlist(list_a))
-    out <- a - amax*risk - cost
+    ks         = K*exp( -1.0 * (-psi_soil/-d)^c )
+    kl         = K*exp( -1.0 * (-psi_leaf/-d)^c )
+    k_crit     = K*exp( -1.0 * (-p_crit/-d)^c )
+    reduction_factor = (kl - k_crit)/(ks - k_crit)
+    cost = (par_cost$alpha * jmax)
+    out <- a*reduction_factor - cost
   
   out <- tibble(cost = cost,
-                risk = risk,
-                out_a = a/amax,
+                risk = reduction_factor,
                 out = out, #umolco2 m-2 s-1
-                out_nocost = a/amax - risk,
+                out_nocost = a*reduction_factor,
                 vcmax = vcmax,
                 jmax = jmax,
                 a = a,
@@ -122,7 +107,8 @@ fn_profit_phydro_sperry <- function(par, psi_soil, e_crit, par_cost, par_photosy
 }
 
 
-fn_profit_phydro_sperry_test <- function(par, psi_soil, e_crit, par_cost, par_photosynth, par_plant, par_env, do_optim = FALSE, opt_hypothesis){
+fn_profit_phydro_sox_test <- function(par, psi_soil, e_crit, p_crit, par_cost, 
+                                      par_photosynth, par_plant, par_env, do_optim = FALSE, opt_hypothesis){
   
   jmax = exp(par[1])  # Jmax in umol/m2/s (logjmax is supplied by the optimizer)
   psi_leaf = -par[2]
@@ -136,26 +122,13 @@ fn_profit_phydro_sperry_test <- function(par, psi_soil, e_crit, par_cost, par_ph
   a     = a_j$a
   ci    = a_j$ci
   vcmax = calc_vcmax_coordinated_numerical(a,ci, par_photosynth)
-  
-  dummy_costs = 0*exp(20*(-abs(dpsi/4)-abs(jmax/1))) # ONLY added near (0,0) for numerical stability.
-    LAI        = par_env$LAI
-    K          = scale_conductivity_ks(par_plant$conductivity, par_env, par_plant, do_backtransform = FALSE)*LAI #mol m-2 (ground) s-1 MPa-1
-    d          = par_plant$d
-    c          = par_plant$c
-    list_a = vector("list", 200)
-    for(i in 1:200){
-      e   <- i * 0.005 * e_crit
-      g   <- e/(1.6*(par_env$vpd/par_env$patm)) #mol m-2 (ground) s-1
-      c_a <- calc_assimilation_limiting(vcmax, jmax, g, par_photosynth)
-      list_a[[i]] <- c_a$a
-    }
-    ks     = K*exp( -1.0 * (-psi_soil/-d)^c )
-    kl     = K*exp( -1.0 * (-psi_leaf/-d)^c )
-    k_crit = K*exp( -1.0 * (-p_crit/-d)^c )
-    risk   = (ks-kl)/(ks-k_crit)
-    cost   = (par_cost$alpha * jmax)
-    amax   = max(unlist(list_a))
-    out <- a - amax*risk - cost
+    ks         = K*exp( -1.0 * (-psi_soil/-d)^c )
+    kl         = K*exp( -1.0 * (-psi_leaf/-d)^c )
+    k_crit     = K*exp( -1.0 * (-p_crit/-d)^c )
+    reduction_factor = (kl - k_crit)/(ks - k_crit)
+    cost = (par_cost$alpha * jmax)
+    out <- a*reduction_factor - cost
+    
   if (do_optim){
     return(-out)
   } else {
@@ -174,6 +147,7 @@ optimise_stomata_phydro_test <- function(fn_profit, psi_soil, par_cost, e_crit, 
     fn             = fn_profit,
     psi_soil       = psi_soil,
     e_crit         = e_crit,
+    p_crit         = p_crit,
     par_cost       = par_cost,
     par_photosynth = par_photosynth,
     par_plant      = par_plant,
@@ -193,7 +167,7 @@ optimise_stomata_phydro_test <- function(fn_profit, psi_soil, par_cost, e_crit, 
   }
 }
 
-calc_phydro_sperry_test <- function(tc, ppfd, vpd, co2, elv, LAI, fapar, kphio, psi_soil, par_plant, rdark, par_cost = NULL){
+calc_phydro_sox_test <- function(tc, ppfd, vpd, co2, elv, LAI, fapar, kphio, psi_soil, par_plant, rdark, par_cost = NULL){
     patm = rpmodel::calc_patm(elv)
   par_photosynth <- list(
     kmm       = rpmodel::calc_kmm(tc, patm),
@@ -231,7 +205,7 @@ calc_phydro_sperry_test <- function(tc, ppfd, vpd, co2, elv, LAI, fapar, kphio, 
       print("WARNING: soil water potential is lower than critical plant water potential.")
     }
 
-  # lj_dps_lim = optimise_stomata_phydro_test(fn_profit_phydro_sperry_test, 
+  # lj_dps_lim = optimise_stomata_phydro_test(fn_profit_phydro_sox_test, 
   #                                    psi_soil = 0, 
   #                                    e_crit = e_crit_jmax_lim,
   #                                    p_crit= p_crit,
@@ -244,7 +218,7 @@ calc_phydro_sperry_test <- function(tc, ppfd, vpd, co2, elv, LAI, fapar, kphio, 
   # jmax_lim  = exp(lj_dps_lim[1]) %>% unname()
   
     # 3. Optimizer
-  lj_dps = optimise_stomata_phydro_test(fn_profit_phydro_sperry_test, 
+  lj_dps = optimise_stomata_phydro_test(fn_profit_phydro_sox_test, 
                                      psi_soil = psi_soil, 
                                      e_crit = e_crit,
                                      p_crit= p_crit,
@@ -332,9 +306,10 @@ par <- expand.grid(logjmax = jmax, dpsi = pl)
 par %>% 
   split(seq(nrow(.))) %>% 
   purrr::map_df(function(x){
-    fn_profit_phydro_sperry(x,
+    fn_profit_phydro_sox(x,
                  psi_soil = psi_soil, 
                  e_crit = e_crit,
+                 p_crit = p_crit,
                  par_cost = par_cost, 
                  par_photosynth = par_photosynth, 
                  par_plant = par_plant, 
@@ -351,7 +326,7 @@ df_res <- res %>% cbind(par)
 
 df_res %>% 
   ggplot()+
-  geom_point(aes(dpsi,out_a), color = "#112CB9")+
+  geom_point(aes(dpsi,a), color = "#112CB9")+
   geom_point(aes(dpsi,risk), color = "#112CB9")+
   geom_point(aes(dpsi,out), color = "#FFB806")+
   geom_point(aes(dpsi,out_nocost), color = "red3")+
@@ -385,6 +360,7 @@ $$
 k_\mathrm{\psi_l} = K_{max}\;(\frac{1}{2})^{(\frac{\psi_l}{\psi_{50}})^b} = K_{max}\;(\frac{1}{2})^{(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}
 $$
 
+$k_\mathrm{\psi_{crit}}$ can be expressed as:
 $$
 k_\mathrm{\psi_{crit}} = K_{max}\;(\frac{1}{2})^{(\frac{\psi_{crit}}{\psi_{50}})^b}
 $$
@@ -401,26 +377,27 @@ $$
 if\; P(\psi) = 0.001 \;  then: \; \psi_{crit} = \psi_{50}(\frac{ln(1000)}{ln(2)} )^{(\frac{1}{b})}
 $$
 
+However we can assume that $k_\mathrm{\psi_{crit}} = 0$, which simplifies the optimization function.
 
 Which gives us the next expression that can be solved similarly as in the P Hydro analytical approximation, where each term is a function of the two independent variables $\chi$ and $\Delta \psi$.
 $$
-F = g_\mathrm{s}  c_\mathrm{a} (1-\chi)- A_{max} (\frac{k_\mathrm{\psi_s}- K_{max}\;(\frac{1}{2})^{(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}}{k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}}) - \alpha J_\mathrm{max}
+F = g_\mathrm{s}  c_\mathrm{a} (1-\chi) (\frac{K_{max}\;(\frac{1}{2})^{(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}}{k_\mathrm{\psi_s}}) - \alpha J_\mathrm{max}
 $$
 
 or:
 $$
-F = g_\mathrm{s}  c_\mathrm{a} (1-\chi) (k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}})- A_{max} (k_\mathrm{\psi_s}- K_{max}\;(\frac{1}{2})^{(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}) - \alpha J_\mathrm{max} (k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}})
+F = g_\mathrm{s}  c_\mathrm{a} (1-\chi) (K_{max}\;(\frac{1}{2})^{(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}) - \alpha J_\mathrm{max}k_\mathrm{\psi_s}
 $$
 
 Solved by $\chi$
 $$
-\frac{\partial F}{\partial \chi} = -g_s c_a(k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}) -\alpha \frac{\partial J_\mathrm{max}}{\partial A_{Jm}} \frac{\partial A_{Jm}}{\partial \chi}( k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}) = 0
+\frac{\partial F}{\partial \chi} = -g_s c_aK_{max}\;(\frac{1}{2})^{(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b} -\alpha \frac{\partial J_\mathrm{max}}{\partial A_{Jm}} \frac{\partial A_{Jm}}{\partial \chi}k_\mathrm{\psi_s} = 0
 $$
 
 Solved by $\Delta\psi$
 $$
-\frac{\partial F}{\partial \Delta\psi} = \frac{\partial g_s}{\partial \Delta\psi} c_a (1-\chi) (k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}})- \frac{A_{max}\;K_{max}\;ln(2)\;(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}{2\;(\Delta\psi + |\psi_s|)(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}-
-\alpha \frac{\partial J_\mathrm{max}}{\partial A_{Jm}} \frac{\partial A_{Jm}}{\partial \Delta\psi}(k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}})= 0
+\frac{\partial F}{\partial \Delta\psi} = \frac{\partial g_s}{\partial \Delta\psi} c_a \frac{ln(2)\;(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}{2\;(\Delta\psi + |\psi_s|)(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b} -\frac{\partial g_s}{\partial \Delta\psi} c_a\chi  \frac{ln(2)\;(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}{2\;(\Delta\psi + |\psi_s|)(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}-
+\alpha \frac{\partial J_\mathrm{max}}{\partial A_{Jm}} \frac{\partial A_{Jm}}{\partial \Delta\psi}k_\mathrm{\psi_s}= 0
 $$
 
 
@@ -438,9 +415,10 @@ e_crit = get_e_crit(psi_soil, K, d, c, h, dens_water) #mol m-2 (ground) s-1
 par %>% 
   split(seq(nrow(.))) %>% 
   purrr::map_df(function(x){
-    fn_profit_phydro_sperry(x,
+    fn_profit_phydro_sox(x,
                  psi_soil = psi_soil, 
                  e_crit = e_crit,
+                 p_crit = p_crit,
                  par_cost = par_cost, 
                  par_photosynth = par_photosynth, 
                  par_plant = par_plant, 
@@ -471,9 +449,10 @@ e_crit = get_e_crit(psi_soil, K, d, c, h, dens_water) #mol m-2 (ground) s-1
 par %>% 
   split(seq(nrow(.))) %>% 
   purrr::map_df(function(x){
-    fn_profit_phydro_sperry(x,
+    fn_profit_phydro_sox(x,
                  psi_soil = psi_soil, 
                  e_crit = e_crit,
+                 p_crit = p_crit,
                  par_cost = par_cost, 
                  par_photosynth = par_photosynth, 
                  par_plant = par_plant, 
@@ -502,9 +481,10 @@ e_crit = get_e_crit(psi_soil, K, d, c, h, dens_water) #mol m-2 (ground) s-1
 par %>% 
   split(seq(nrow(.))) %>% 
   purrr::map_df(function(x){
-    fn_profit_phydro_sperry(x,
+    fn_profit_phydro_sox(x,
                  psi_soil = psi_soil, 
                  e_crit = e_crit,
+                 p_crit = p_crit,
                  par_cost = par_cost, 
                  par_photosynth = par_photosynth, 
                  par_plant = par_plant, 
@@ -533,9 +513,10 @@ e_crit = get_e_crit(psi_soil, K, d, c, h, dens_water) #mol m-2 (ground) s-1
 par %>% 
   split(seq(nrow(.))) %>% 
   purrr::map_df(function(x){
-    fn_profit_phydro_sperry(x,
+    fn_profit_phydro_sox(x,
                  psi_soil = psi_soil, 
                  e_crit = e_crit,
+                 p_crit = p_crit,
                  par_cost = par_cost, 
                  par_photosynth = par_photosynth, 
                  par_plant = par_plant, 
@@ -705,7 +686,7 @@ if (!is.null(ref)){
 Here I show the simulations for the soil potential gradient. The plant have a $\psi_{50}$ = -3.46 a slope parameter of 6.55 and a $K$ of 3e-17
 ```{r,echo=FALSE}
 
-# phydro_sperry_bf <- function(x){
+# phydro_sox_bf <- function(x){
 #     psi_soil <- x
 #     jmax <- seq(1,5,0.2)
 #     pl <- seq(0.02,3.4,0.02)
@@ -714,7 +695,7 @@ Here I show the simulations for the soil potential gradient. The plant have a $\
 #     par %>% 
 #     split(seq(nrow(.))) %>% 
 #     purrr::map_df(function(y){
-#     fn_profit_phydro_sperry(y,
+#     fn_profit_phydro_sox(y,
 #                  psi_soil = psi_soil, 
 #                  e_crit = e_crit,
 #                  par_cost = par_cost, 
@@ -730,10 +711,10 @@ Here I show the simulations for the soil potential gradient. The plant have a $\
 # }
 
 # dat_soilm_numerical = tibble(var=seq(-5,0,length.out=10)) %>% 
-#   mutate(out_hydraulics = purrr::map(var, ~phydro_sperry_bf(.)) ) %>%
+#   mutate(out_hydraulics = purrr::map(var, ~phydro_sox_bf(.)) ) %>%
 #   unnest_wider(out_hydraulics, names_sep = "_")
 dat_soilm_numerical = tibble(var=seq(-5,0,length.out=20)) %>% 
-  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_sperry_test(tc = 25, ppfd = 400, vpd = 1000, co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = .,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.1)))) %>%
+  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_sox_test(tc = 25, ppfd = 400, vpd = 1000, co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = .,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.1)))) %>%
   unnest_wider(out_hydraulics, names_sep = "_")
 
 
@@ -743,16 +724,15 @@ l1= dat_soilm_numerical %>%
 cowplot::plot_grid(plotlist = l1, labels="", label_size = 16, label_colour = "grey50", label_x = 0.3, hjust = 0, align = "hv", rel_widths = 1, nrow=3, byrow=T)
 ```
 
-
 And here the simulations for VPD. Lines are simulations with $\psi_s$ equal to -1 MPa and dots -3 MPa.
 ```{r,echo=FALSE}
 
 dat_vpd_numerical = tibble(var=seq(100,3000,length.out=20)) %>% 
-  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_sperry_test(tc = 25, ppfd = 400, vpd = ., co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = -1,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.1)))) %>%
+  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_sox_test(tc = 25, ppfd = 400, vpd = ., co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = -1,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.1)))) %>%
   unnest_wider(out_hydraulics, names_sep = "_")
 
 dat_vpd2_numerical = tibble(var=seq(100,3000,length.out=20)) %>% 
-  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_sperry_test(tc = 25, ppfd = 400, vpd = ., co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = -3,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.1)))) %>%
+  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_sox_test(tc = 25, ppfd = 400, vpd = ., co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = -3,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.1)))) %>%
   unnest_wider(out_hydraulics, names_sep = "_")
 
 

@@ -308,9 +308,10 @@ fn_profit <- function(par, psi_soil, par_cost, e_crit, p_crit, par_photosynth,
     K          = scale_conductivity_ks(par_plant$conductivity, par_env, par_plant, do_backtransform = TRUE)*LAI #mol m-2 (ground) s-1 MPa-1
     d          = par_plant$d
     c          = par_plant$c
-    kl = K*exp( -1.0 * (-psi_leaf/-d)^c )
-    k_crit = K*exp( -1.0 * (-p_crit/-d)^c )
-    reduction_factor = (kl - k_crit)/(K - k_crit)
+    ks         = K*exp( -1.0 * (-psi_soil/-d)^c )
+    kl         = K*exp( -1.0 * (-psi_leaf/-d)^c )
+    k_crit     = K*exp( -1.0 * (-p_crit/-d)^c )
+    reduction_factor = (kl - k_crit)/(ks - k_crit)
     out <- a*reduction_factor - (par_cost$alpha * jmax)
   }
   
@@ -376,9 +377,10 @@ fn_profit_instantaneous <- function(par, jmax, vcmax, psi_soil, e_crit, p_crit, 
     K          = scale_conductivity_ks(par_plant$conductivity, par_env, par_plant, do_backtransform = TRUE)*LAI #mol m-2 (ground) s-1 MPa-1
     d          = par_plant$d
     c          = par_plant$c
-    kl = K*exp( -1.0 * (-psi_leaf/-d)^c )
-    k_crit = K*exp( -1.0 * (-p_crit/-d)^c )
-    reduction_factor = (kl - k_crit)/(K - k_crit)
+    ks         = K*exp( -1.0 * (-psi_soil/-d)^c )
+    kl         = K*exp( -1.0 * (-psi_leaf/-d)^c )
+    k_crit     = K*exp( -1.0 * (-p_crit/-d)^c )
+    reduction_factor = (kl - k_crit)/(ks - k_crit)
     profit <- A*reduction_factor
   }
   
