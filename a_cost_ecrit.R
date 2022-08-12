@@ -15,7 +15,7 @@ get_p <- function(psi_soil, e, K, d, c, h) {
 }
 
 get_e_crit <- function(psi_soil, K, d, c, h){
-  p_crit = d * log(1000.0) ** (1.0/c)
+  p_crit = d * log(1000) ** (1.0/c)
   e_min  = 0.0
   e_max  = 100.0
   e_crit = 50.0

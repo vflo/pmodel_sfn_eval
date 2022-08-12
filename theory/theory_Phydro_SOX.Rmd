@@ -86,10 +86,10 @@ fn_profit_phydro_sox <- function(par, psi_soil, e_crit, p_crit, par_cost, par_ph
   a     = a_j$a
   ci    = a_j$ci
   vcmax = calc_vcmax_coordinated_numerical(a,ci, par_photosynth)
-    ks         = K*exp( -1.0 * (-psi_soil/-d)^c )
-    kl         = K*exp( -1.0 * (-psi_leaf/-d)^c )
-    k_crit     = K*exp( -1.0 * (-p_crit/-d)^c )
-    reduction_factor = (kl - k_crit)/(ks - k_crit)
+    ks         = K*(1/2)^(psi_soil/par_plant$psi50)^par_plant$b
+    kl         = K*(1/2)^(psi_leaf/par_plant$psi50)^par_plant$b
+    k_crit     = 0
+    reduction_factor = (kl - k_crit)/(K - k_crit)
     cost = (par_cost$alpha * jmax)
     out <- a*reduction_factor - cost
   
@@ -111,8 +111,8 @@ fn_profit_phydro_sox_test <- function(par, psi_soil, e_crit, p_crit, par_cost,
                                       par_photosynth, par_plant, par_env, do_optim = FALSE, opt_hypothesis){
   
   jmax = exp(par[1])  # Jmax in umol/m2/s (logjmax is supplied by the optimizer)
-  psi_leaf = -par[2]
-  dpsi = par[2]+psi_soil       # delta Psi in MPa
+  dpsi = par[2]#      # delta Psi in MPa
+  psi_leaf = psi_soil-dpsi
   
   gs = calc_gs_test(dpsi, psi_soil, par_plant, par_env) * par_env$LAI  # gs in mol/m2ground/s
   e  = 1.6*gs*(par_env$vpd/par_env$patm)         # E in mol/m2ground/s
@@ -122,10 +122,10 @@ fn_profit_phydro_sox_test <- function(par, psi_soil, e_crit, p_crit, par_cost,
   a     = a_j$a
   ci    = a_j$ci
   vcmax = calc_vcmax_coordinated_numerical(a,ci, par_photosynth)
-    ks         = K*exp( -1.0 * (-psi_soil/-d)^c )
-    kl         = K*exp( -1.0 * (-psi_leaf/-d)^c )
-    k_crit     = K*exp( -1.0 * (-p_crit/-d)^c )
-    reduction_factor = (kl - k_crit)/(ks - k_crit)
+    ks         = K*(1/2)^(psi_soil/par_plant$psi50)^par_plant$b
+    kl         = K*(1/2)^(psi_leaf/par_plant$psi50)^par_plant$b
+    k_crit     = 0
+    reduction_factor = (kl - k_crit)/(K - k_crit)
     cost = (par_cost$alpha * jmax)
     out <- a*reduction_factor - cost
     
@@ -141,9 +141,9 @@ optimise_stomata_phydro_test <- function(fn_profit, psi_soil, par_cost, e_crit, 
   if(is.null(jmax_lim)){jmax_lim = 7}
   
   out_optim <- optimr::optimr(
-    par            = c(logjmax=0, dpsi=(psi_soil-p_crit)/2),  
-    lower          = c(-10, -psi_soil+0.0001),
-    upper          = c(jmax_lim, -p_crit),
+    par            = c(logjmax=-4, dpsi=(psi_soil-p_crit)/2),  
+    lower          = c(-10, 0.001),
+    upper          = c(jmax_lim,(psi_soil-p_crit)),
     fn             = fn_profit,
     psi_soil       = psi_soil,
     e_crit         = e_crit,
@@ -189,13 +189,8 @@ calc_phydro_sox_test <- function(tc, ppfd, vpd, co2, elv, LAI, fapar, kphio, psi
   )
   LAI        = par_env$LAI
   K          = scale_conductivity_ks(par_plant$conductivity, par_env, par_plant, do_backtransform = FALSE)*LAI #mol m-2 (ground) s-1 MPa-1
-  d          = par_plant$d
-  c          = par_plant$c
-  h          = par_plant$height
-  dens_water = par_env$density_water
   p_crit = par_plant$psi50 * (log(1000)/log(2)) ^ ( 1/par_plant$b)
-  e_crit_jmax_lim = get_e_crit(0, K, d, c, h, dens_water) #mol m-2 (ground) s-1
-  e_crit = get_e_crit(psi_soil, K, d, c, h, dens_water) #mol m-2 (ground) s-1
+  e_crit = K * -integral_P_ecrit(psi_soil, par_plant$psi50, par_plant$b) #mol m-2 (ground) s-1
  
     # 2. if soil psi is lower than p_crit, set soil psi to 98% p_crit 
     low_swp <- FALSE
@@ -204,18 +199,6 @@ calc_phydro_sox_test <- function(tc, ppfd, vpd, co2, elv, LAI, fapar, kphio, psi
       low_swp  = TRUE
       print("WARNING: soil water potential is lower than critical plant water potential.")
     }
-
-  # lj_dps_lim = optimise_stomata_phydro_test(fn_profit_phydro_sox_test, 
-  #                                    psi_soil = 0, 
-  #                                    e_crit = e_crit_jmax_lim,
-  #                                    p_crit= p_crit,
-  #                                    par_cost  = par_cost, 
-  #                                    par_photosynth = par_photosynth, 
-  #                                    par_plant = par_plant, 
-  #                                    par_env = par_env, 
-  #                                    jmax_lim = NULL,
-  #                                    opt_hypothesis = "PM")
-  # jmax_lim  = exp(lj_dps_lim[1]) %>% unname()
   
     # 3. Optimizer
   lj_dps = optimise_stomata_phydro_test(fn_profit_phydro_sox_test, 
@@ -230,8 +213,8 @@ calc_phydro_sox_test <- function(tc, ppfd, vpd, co2, elv, LAI, fapar, kphio, psi
                                      opt_hypothesis = "PM")
 
     jmax  = exp(lj_dps[1]) %>% unname()
-    psi_l = -1* lj_dps[2] %>% unname()
-    dpsi  =  psi_soil - psi_l
+    dpsi  = lj_dps[2] %>% unname()
+    psi_l = psi_soil-dpsi
     gs    = calc_gs_test(dpsi, psi_soil, par_plant, par_env) * par_env$LAI # gs in mol m-2 (ground) s-1
     a_j   = calc_assim_light_limited(gs = gs, jmax = jmax, par_photosynth = par_photosynth)
     a     = a_j$a
@@ -291,15 +274,11 @@ psi_soil = -0.01
 
 LAI        = par_env$LAI
 K          = scale_conductivity_ks(par_plant$conductivity, par_env, par_plant, do_backtransform = FALSE)*LAI #mol m-2 (ground) s-1 MPa-1
-d          = par_plant$d
-c          = par_plant$c
-h          = par_plant$height
-dens_water = par_env$density_water
 p_crit = par_plant$psi50 * (log(1000)/log(2)) ^ ( 1/par_plant$b)
-e_crit = get_e_crit(psi_soil, K, d, c, h, dens_water) #mol m-2 (ground) s-1
+e_crit = K * -integral_P_ecrit(psi_soil, par_plant$psi50, par_plant$b) #mol m-2 (ground) s-1
 
 
-jmax <- 4
+jmax <- 3
 pl <- seq(0.02,5,0.02)
 par <- expand.grid(logjmax = jmax, dpsi = pl)
 
@@ -411,7 +390,7 @@ pl <- seq(0.02,3.4,0.02)
 par <- expand.grid(logjmax = jmax, dpsi = pl)
 
 psi_soil = -0.01
-e_crit = get_e_crit(psi_soil, K, d, c, h, dens_water) #mol m-2 (ground) s-1
+e_crit = K * -integral_P_ecrit(psi_soil, par_plant$psi50, par_plant$b) #mol m-2 (ground) s-1
 par %>% 
   split(seq(nrow(.))) %>% 
   purrr::map_df(function(x){
@@ -445,7 +424,7 @@ df_res1 %>%# filter(log(jmax) == 4)%>%
   NULL -> f1
 
 psi_soil = -1
-e_crit = get_e_crit(psi_soil, K, d, c, h, dens_water) #mol m-2 (ground) s-1
+e_crit = K * -integral_P_ecrit(psi_soil, par_plant$psi50, par_plant$b) #mol m-2 (ground) s-1
 par %>% 
   split(seq(nrow(.))) %>% 
   purrr::map_df(function(x){
@@ -477,7 +456,7 @@ df_res2 %>%
 
 
 psi_soil = -2
-e_crit = get_e_crit(psi_soil, K, d, c, h, dens_water) #mol m-2 (ground) s-1
+e_crit = K * -integral_P_ecrit(psi_soil, par_plant$psi50, par_plant$b) #mol m-2 (ground) s-1
 par %>% 
   split(seq(nrow(.))) %>% 
   purrr::map_df(function(x){
@@ -509,7 +488,7 @@ df_res3 %>%
 
 
 psi_soil = -3
-e_crit = get_e_crit(psi_soil, K, d, c, h, dens_water) #mol m-2 (ground) s-1
+e_crit = K * -integral_P_ecrit(psi_soil, par_plant$psi50, par_plant$b) #mol m-2 (ground) s-1
 par %>% 
   split(seq(nrow(.))) %>% 
   purrr::map_df(function(x){
@@ -691,7 +670,7 @@ Here I show the simulations for the soil potential gradient. The plant have a $\
 #     jmax <- seq(1,5,0.2)
 #     pl <- seq(0.02,3.4,0.02)
 #     par <- expand.grid(logjmax = jmax, dpsi = pl)
-#     e_crit = get_e_crit(psi_soil, K, d, c, h, dens_water) #mol m-2 (ground) s-1
+#     e_crit = K * -integral_P_ecrit(psi_soil, par_plant$psi50, par_plant$b) #mol m-2 (ground) s-1
 #     par %>% 
 #     split(seq(nrow(.))) %>% 
 #     purrr::map_df(function(y){

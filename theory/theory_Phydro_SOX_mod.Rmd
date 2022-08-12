@@ -1,5 +1,5 @@
 ---
-title: "The P Hydro model with Wang optimization"
+title: "The P Hydro model with sox optimization"
 author: "Victor Flo"
 date: "`r Sys.Date()`"
 output:
@@ -20,9 +20,14 @@ library(gridExtra)
 library(scales)
 ```
 
-The following is a proposal to remove the $\gamma$ parameter from P Hydro and modify the hydraulic cost. In this approach we use the method of Yujie Wang et al. 2020 to calculate the optimum by maximising the distance between $A·E_{critical}$ and $A·E_{actual}$. Compared to the Wang's model, here we use the P Hydro framework and account for the cost of $J_{max}$ to include the acclimation response of photosynthesis. We maintain the same value for the $\alpha$ parameter from P Hydro.
+The SOX stomatal scheme (Eller et al. 2018) is obtimised as:
 $$
-F = (A_j - \alpha J_\mathrm{max})_{Ecrit} - (A_j - \alpha J_\mathrm{max})_{Eactual}
+F_{ProfitMax} = A_j  (\frac{k_\mathrm{\psi_l}-k_\mathrm{\psi_{crit}}}{k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}})
+$$
+
+Then, accounting for photosynthetic cost:
+$$
+F = A_j  (\frac{k_\mathrm{\psi_l}-k_\mathrm{\psi_{crit}}}{k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}}) - \alpha J_\mathrm{max}
 $$
 
 ```{r, echo = FALSE, include = FALSE, message = FALSE}
@@ -62,19 +67,16 @@ get_std_photosythnesis_params = function(){
     Iabs = ppfd*fapar,
     ca = co2*p*1e-6,  # Convert to partial pressure
     patm = p,
-    delta = 0.02
+    delta = 0.00
   ))
 }
 
-
-#################################################################################################
-# PHYDRO WANG
-#################################################################################################
-
-fn_profit_phydro_wang <- function(par, psi_soil, par_cost, par_photosynth, par_plant, par_env, do_optim = FALSE, opt_hypothesis){
+fn_profit_phydro_sox <- function(par, psi_soil, e_crit, p_crit, par_cost, par_photosynth, 
+                                 par_plant, par_env, do_optim = FALSE, opt_hypothesis){
   
   jmax = exp(par[1])$logjmax  # Jmax in umol/m2/s (logjmax is supplied by the optimizer)
   dpsi = par[2]$dpsi       # delta Psi in MPa
+  psi_leaf = psi_soil-dpsi
   K = scale_conductivity_ks(par_plant$conductivity, par_env, par_plant, do_backtransform = FALSE)
   gs = calc_gs_test(dpsi, psi_soil, par_plant, par_env) * par_env$LAI  # gs in mol/m2ground/s
   e  = 1.6*gs*(par_env$vpd/par_env$patm)         # E in mol/m2ground/s
@@ -84,13 +86,17 @@ fn_profit_phydro_wang <- function(par, psi_soil, par_cost, par_photosynth, par_p
   a     = a_j$a
   ci    = a_j$ci
   vcmax = calc_vcmax_coordinated_numerical(a,ci, par_photosynth)
+    ks         = K*(1/2)^(psi_soil/par_plant$psi50)^par_plant$b
+    kl         = K*(1/2)^(psi_leaf/par_plant$psi50)^par_plant$b
+    k_crit     = 0
+    reduction_factor = (kl - k_crit)/(ks - k_crit)
+    cost = (par_cost$alpha * jmax)
+    out <- a*reduction_factor - cost
   
-  cost = (par_cost$alpha*jmax) #umolco2 umolh2o m-2 s-1
-  e_e_crit = -integral_P_e_ecrit(dpsi, psi_soil, par_plant$psi50,par_plant$b)
-  
-  out <- tibble(out_ecrit = (a-cost),
-                out_e = (a-cost)*e_e_crit,
-                out = out_ecrit-out_e, #umolco2 m-2 s-1
+  out <- tibble(cost = cost,
+                risk = reduction_factor,
+                out = out, #umolco2 m-2 s-1
+                out_nocost = a*reduction_factor,
                 vcmax = vcmax,
                 jmax = jmax,
                 a = a,
@@ -101,26 +107,28 @@ fn_profit_phydro_wang <- function(par, psi_soil, par_cost, par_photosynth, par_p
 }
 
 
-fn_profit_phydro_wang_test <- function(par, psi_soil, par_cost, p_crit, e_crit,
-                                       par_photosynth, par_plant, par_env, do_optim = FALSE, opt_hypothesis){
+fn_profit_phydro_sox_test <- function(par, psi_soil, e_crit, p_crit, par_cost, 
+                                      par_photosynth, par_plant, par_env, do_optim = FALSE, opt_hypothesis){
   
   jmax = exp(par[1])  # Jmax in umol/m2/s (logjmax is supplied by the optimizer)
-  dpsi = par[2]#+psi_soil       # delta Psi in MPa
+  dpsi = par[2]#      # delta Psi in MPa
+  psi_leaf = psi_soil-dpsi
   
   gs = calc_gs_test(dpsi, psi_soil, par_plant, par_env) * par_env$LAI  # gs in mol/m2ground/s
-
+  e  = 1.6*gs*(par_env$vpd/par_env$patm)         # E in mol/m2ground/s
+  
   ## light-limited assimilation
   a_j   <- calc_assim_light_limited(gs, jmax, par_photosynth) # Aj in umol/m2ground/s
   a     = a_j$a
-
-  cost = (par_cost$alpha*jmax) #umolco2 umolh2o m-2 s-1
-  e_e_crit = -integral_P_e_ecrit(dpsi, psi_soil, par_plant$psi50,par_plant$b)
-  out_e = (a)*e_e_crit
-  out = a - out_e - cost
-  # out_ecrit = (a-cost)
-  # out_e = (a-cost)*e_e_crit
-  # out = out_ecrit-out_e
-  # if(out_e>=out_ecrit){out = 0}
+  ci    = a_j$ci
+  vcmax = calc_vcmax_coordinated_numerical(a,ci, par_photosynth)
+    ks         = K*(1/2)^(psi_soil/par_plant$psi50)^par_plant$b
+    kl         = K*(1/2)^(psi_leaf/par_plant$psi50)^par_plant$b
+    k_crit     = 0
+    reduction_factor = (kl - k_crit)/(ks - k_crit)
+    cost = (par_cost$alpha * jmax)
+    out <- a*reduction_factor - cost
+    
   if (do_optim){
     return(-out)
   } else {
@@ -128,31 +136,26 @@ fn_profit_phydro_wang_test <- function(par, psi_soil, par_cost, p_crit, e_crit,
   }
 }
 
-
-
-optimise_stomata_phydro_test <- function(fn_profit, psi_soil, par_cost, p_crit, e_crit, par_photosynth, 
+optimise_stomata_phydro_test <- function(fn_profit, psi_soil, par_cost, e_crit, p_crit, par_photosynth, 
                                          par_plant, par_env, jmax_lim, return_all = FALSE, do_optim=TRUE, opt_hypothesis){
   if(is.null(jmax_lim)){jmax_lim = 7}
   
-  
   out_optim <- optimr::optimr(
-    par            = c(logjmax=-4, dpsi=1),  
+    par            = c(logjmax=-4, dpsi=(psi_soil-p_crit)/2),  
     lower          = c(-10, 0.001),
-    upper          = c(jmax_lim,10),
+    upper          = c(jmax_lim,(psi_soil-p_crit)),
     fn             = fn_profit,
     psi_soil       = psi_soil,
-    par_cost       = par_cost,
-    p_crit         = p_crit,
     e_crit         = e_crit,
+    p_crit         = p_crit,
+    par_cost       = par_cost,
     par_photosynth = par_photosynth,
     par_plant      = par_plant,
     par_env        = par_env,
     do_optim       = do_optim,
     opt_hypothesis = opt_hypothesis,
     method         = "L-BFGS-B",
-    control        = list(maxit = 500, maximize = TRUE, 
-                          fnscale = 1e6, parscale = c(2,1)
-                          )
+    control        = list(maxit = 500, maximize = TRUE, fnscale = 1e6)
   )
   
   out_optim$value <- -out_optim$value
@@ -164,7 +167,7 @@ optimise_stomata_phydro_test <- function(fn_profit, psi_soil, par_cost, p_crit, 
   }
 }
 
-calc_phydro_wang_test <- function(tc, ppfd, vpd, co2, elv, LAI, fapar, kphio, psi_soil, rdark, par_plant,  par_cost = NULL){
+calc_phydro_sox_test <- function(tc, ppfd, vpd, co2, elv, LAI, fapar, kphio, psi_soil, par_plant, rdark, par_cost = NULL){
     patm = rpmodel::calc_patm(elv)
   par_photosynth <- list(
     kmm       = rpmodel::calc_kmm(tc, patm),
@@ -186,21 +189,19 @@ calc_phydro_wang_test <- function(tc, ppfd, vpd, co2, elv, LAI, fapar, kphio, ps
   )
   LAI        = par_env$LAI
   K          = scale_conductivity_ks(par_plant$conductivity, par_env, par_plant, do_backtransform = FALSE)*LAI #mol m-2 (ground) s-1 MPa-1
-  d          = par_plant$d
   p_crit = par_plant$psi50 * (log(1000)/log(2)) ^ ( 1/par_plant$b)
   e_crit = K * -integral_P_ecrit(psi_soil, par_plant$psi50, par_plant$b) #mol m-2 (ground) s-1
  
     # 2. if soil psi is lower than p_crit, set soil psi to 98% p_crit 
-    # low_swp <- FALSE
-    # if(psi_soil <= p_crit){
-    #   psi_soil = p_crit*0.98
-    #   low_swp  = TRUE
-    #   print("WARNING: soil water potential is lower than critical plant water potential.")
-    # }
-
-  jmax_lim = exp(7)
+    low_swp <- FALSE
+    if(psi_soil <= p_crit){
+      psi_soil = p_crit*0.98
+      low_swp  = TRUE
+      print("WARNING: soil water potential is lower than critical plant water potential.")
+    }
+  
     # 3. Optimizer
-  lj_dps = optimise_stomata_phydro_test(fn_profit_phydro_wang_test, 
+  lj_dps = optimise_stomata_phydro_test(fn_profit_phydro_sox_test, 
                                      psi_soil = psi_soil, 
                                      e_crit = e_crit,
                                      p_crit= p_crit,
@@ -208,14 +209,12 @@ calc_phydro_wang_test <- function(tc, ppfd, vpd, co2, elv, LAI, fapar, kphio, ps
                                      par_photosynth = par_photosynth, 
                                      par_plant = par_plant, 
                                      par_env = par_env,
-                                     jmax_lim = log(jmax_lim),
+                                     jmax_lim = NULL,
                                      opt_hypothesis = "PM")
 
     jmax  = exp(lj_dps[1]) %>% unname()
     dpsi  = lj_dps[2] %>% unname()
     psi_l = psi_soil-dpsi
-    # psi_l = -1* lj_dps[2] %>% unname()
-    # dpsi  =  psi_soil - psi_l
     gs    = calc_gs_test(dpsi, psi_soil, par_plant, par_env) * par_env$LAI # gs in mol m-2 (ground) s-1
     a_j   = calc_assim_light_limited(gs = gs, jmax = jmax, par_photosynth = par_photosynth)
     a     = a_j$a
@@ -234,112 +233,10 @@ calc_phydro_wang_test <- function(tc, ppfd, vpd, co2, elv, LAI, fapar, kphio, ps
       ci           = ci,
       chi          = ci/par_photosynth$ca,
       vcmax        = vcmax,
-      jmax_lim     = jmax_lim 
+      jmax_lim     = 0 
     ))
   }
 
-
-
-#################################################################################################
-# PHYDRO
-#################################################################################################
-calc_phydro_test <- function(tc, ppfd, vpd, co2, elv, LAI, fapar, kphio, psi_soil, rdark, par_plant,  par_cost = NULL){
-    patm = rpmodel::calc_patm(elv)
-  par_photosynth <- list(
-    kmm       = rpmodel::calc_kmm(tc, patm),
-    gammastar = rpmodel::calc_gammastar(tc, patm),
-    phi0      = kphio * rpmodel::calc_ftemp_kphio(tc),
-    Iabs      = ppfd * fapar,
-    ca        = co2 * patm * 1e-6,  # Convert to partial pressure
-    patm      = patm,
-    delta     = rdark
-    # delta     = ftemp_inst_rd( tc )
-  )
-  par_env = list(
-    viscosity_water = rpmodel::calc_viscosity_h2o(tc, patm),  # Needs to be imported from rpmodel.R
-    density_water   = rpmodel::calc_density_h2o(tc, patm),  # Needs to be imported from rpmodel.R
-    patm            = patm,
-    tc              = tc,
-    vpd             = vpd,
-    LAI             = LAI
-  )
-  LAI        = par_env$LAI
-  K          = scale_conductivity_ks(par_plant$conductivity, par_env, par_plant, do_backtransform = FALSE)*LAI #mol m-2 (ground) s-1 MPa-1
-  d          = par_plant$d
-  p_crit = par_plant$psi50 * (log(1000)/log(2)) ^ ( 1/par_plant$b)
-  e_crit = K * -integral_P_ecrit(psi_soil, par_plant$psi50, par_plant$b) #mol m-2 (ground) s-1
- 
-    # 2. if soil psi is lower than p_crit, set soil psi to 98% p_crit 
-    # low_swp <- FALSE
-    # if(psi_soil <= p_crit){
-    #   psi_soil = p_crit*0.98
-    #   low_swp  = TRUE
-    #   print("WARNING: soil water potential is lower than critical plant water potential.")
-    # }
-
-  jmax_lim = exp(7)
-    # 3. Optimizer
-  lj_dps = optimise_stomata_phydro_test(fn_profit_phydro_test, 
-                                     psi_soil = psi_soil, 
-                                     e_crit = e_crit,
-                                     p_crit= p_crit,
-                                     par_cost  = par_cost, 
-                                     par_photosynth = par_photosynth, 
-                                     par_plant = par_plant, 
-                                     par_env = par_env,
-                                     jmax_lim = log(jmax_lim),
-                                     opt_hypothesis = "PM")
-
-    jmax  = exp(lj_dps[1]) %>% unname()
-    dpsi  = lj_dps[2] %>% unname()
-    psi_l = psi_soil-dpsi
-    # psi_l = -1* lj_dps[2] %>% unname()
-    # dpsi  =  psi_soil - psi_l
-    gs    = calc_gs_test(dpsi, psi_soil, par_plant, par_env) * par_env$LAI # gs in mol m-2 (ground) s-1
-    a_j   = calc_assim_light_limited(gs = gs, jmax = jmax, par_photosynth = par_photosynth)
-    a     = a_j$a
-    ci    = a_j$ci
-    vcmax = calc_vcmax_coordinated_numerical(a, ci, par_photosynth)
-    E     = 1.6 * gs * par_env$vpd/patm  # E in mol m-2 (ground) s-1
-    #gs    = gs/patm*1e6 #transform to umol m-2(ground) s-1 Pa-1
-
-    return(list(
-      jmax         = jmax,
-      dpsi         = dpsi,
-      p_leaf       = psi_l,
-      gs           = gs,
-      E            = E,
-      a            = a,
-      ci           = ci,
-      chi          = ci/par_photosynth$ca,
-      vcmax        = vcmax,
-      jmax_lim     = jmax_lim 
-    ))
-  }
-
-
-
-fn_profit_phydro_test <- function(par, psi_soil, par_cost, p_crit, e_crit,
-                                       par_photosynth, par_plant, par_env, do_optim = FALSE, opt_hypothesis){
-  
-  jmax = exp(par[1])  # Jmax in umol/m2/s (logjmax is supplied by the optimizer)
-  dpsi = par[2]#+psi_soil       # delta Psi in MPa
-  
-  gs = calc_gs_test(dpsi, psi_soil, par_plant, par_env) * par_env$LAI  # gs in mol/m2ground/s
-
-  ## light-limited assimilation
-  a_j   <- calc_assim_light_limited(gs, jmax, par_photosynth) # Aj in umol/m2ground/s
-  a     = a_j$a
-    costs = par_cost$alpha * jmax + par_cost$gamma * dpsi^2 #((abs((-dpsi)/par_plant$psi50)))^2  
-    out <- a - costs
-  if (do_optim){
-    return(-out)
-  } else {
-    return(out)
-  }
-}
-
-####################################################################################3
 
 par_cost = list(
   alpha = 0.1     # cost of jmax
@@ -356,24 +253,20 @@ par_env = list(
   LAI = 1.5
 )
 
-  par_plant = list(
-    # Ks0=1e-12,              # m2
-    # v_huber=1e-4,           #
-    height=10,              # m
-    # conductivity_scalar=3,  # Scales (Ks0*v_huber/H)
-    # conductivity = 3e-17,
-    conductivity = 1e-16,
-    psi50 = -1.46,
-    # psi50 = -3.46,             # Mpa
-    d = -3.66,
-    c = 6.55,
-    # b=6.55,                    # 
-    b=1,
-    rs = 0.1*1e-6,
-    rr =2,
-    dens_sapwood = 700
-  )
-
+par_plant = list(
+  # Ks0=1e-12,              # m2
+  # v_huber=1e-4,           #
+  height=10,              # m
+  # conductivity_scalar=3,  # Scales (Ks0*v_huber/H)
+  conductivity = 3e-17,
+  psi50 = -3.46,             # Mpa
+  d = -3.66,
+  c = 6.55,
+  b=6.55,                    # 
+  rs = 0.1*1e-6,
+  rr =2,
+  dens_sapwood = 700
+)
 
 par_photosynth = get_std_photosythnesis_params()
 
@@ -392,8 +285,10 @@ par <- expand.grid(logjmax = jmax, dpsi = pl)
 par %>% 
   split(seq(nrow(.))) %>% 
   purrr::map_df(function(x){
-    fn_profit_phydro_wang(x,
+    fn_profit_phydro_sox(x,
                  psi_soil = psi_soil, 
+                 e_crit = e_crit,
+                 p_crit = p_crit,
                  par_cost = par_cost, 
                  par_photosynth = par_photosynth, 
                  par_plant = par_plant, 
@@ -410,49 +305,48 @@ df_res <- res %>% cbind(par)
 
 df_res %>% 
   ggplot()+
-  geom_point(aes(dpsi,out_ecrit), color = "#112CB9")+
-  geom_point(aes(dpsi,out_e), color = "#112CB9")+
+  geom_point(aes(dpsi,a), color = "#112CB9")+
+  geom_point(aes(dpsi,risk), color = "#112CB9")+
   geom_point(aes(dpsi,out), color = "#FFB806")+
+  geom_point(aes(dpsi,out_nocost), color = "red3")+
   geom_vline(aes(xintercept=df_res[which(df_res$out == df_res$out %>% max(na.rm = TRUE)),"dpsi"]), linetype = 2)+
+  # geom_vline(aes(xintercept=df_res[which(df_res$out_nocost == df_res$out_nocost %>% max(na.rm = TRUE)),"dpsi"]), linetype = 2, color = "red")+
   ylab("OUT")+
-  geom_text(x=3, y=-0.25, label="Example of Profit functions with VPD = 1 kPa, \n psi soil = -0.01 MPa and Jmax fixed",
+  geom_text(x=3, y=-4, label="Example of Profit functions with VPD = 1 kPa, \n psi soil = -0.01 MPa and Jmax fixed",
             family = "arial", fontface = "italic")+
   theme_classic()+
   # ylim(-0.5,0.5)+
   NULL
-# 
-# df_res %>% 
-#   ggplot()+
-#   geom_point(aes(gs,out_ecrit), color = "#112CB9")+
-#   geom_point(aes(gs,out_e), color = "#112CB9")+
-#   geom_point(aes(gs,out), color = "#FFB806")+
-#   ylab("OUT")+
-#   theme_classic()+
-#   NULL
+
 
 ```
 
-The profit maximization can be rewritten as:
+Red line represents the profit optimization function of the original ProfitMax scheme. In yellow the proposed profit function. The upper blue line is the relative assimilation component and the lower is the normalized hydraulic penalization. The dashed vertical line represents the dpsi where the maximum profit is obtained.
+
+
+The components of the profit maximization function can be rewritten as:
 $$
-F = A_j (1-\frac{E}{E_\mathrm{crit}}) - \alpha J_\mathrm{max} (1-\frac{E}{E_\mathrm{crit}})
+A_j = g_\mathrm{s}  c_\mathrm{a} (1-\chi)
 $$
 
 
-and then
 $$
-F = g_\mathrm{s}  c_\mathrm{a} (1-\chi) (1-\frac{E}{E_\mathrm{crit}}) - \alpha J_\mathrm{max} (1-\frac{E}{E_\mathrm{crit}})
-$$
-
-$E$ can be calculated as the stand conductance ($K$) multiplied by the gradient between the soil and the leaf water potential.
-$$
-E = K (\psi_\mathrm{s} - \psi_\mathrm{l}) =  K \Delta\psi \;\;\;; \;\;\; \psi_\mathrm{l} = \psi_\mathrm{s}-\Delta\psi
+k_\mathrm{\psi_s} = K_{max}\;(\frac{1}{2})^{(\frac{\psi_s}{\psi_{50}})^b}
 $$
 
-Critical transpiration ($E_{crit}$) is equivalent to the maximum transpiration for a given soil potential, assuming no conductivity losses.
+
 $$
-E_\mathrm{crit} = K (\psi_\mathrm{s} - \psi_\mathrm{crit})
+k_\mathrm{\psi_l} = K_{max}\;(\frac{1}{2})^{(\frac{\psi_l}{\psi_{50}})^b} = K_{max}\;(\frac{1}{2})^{(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}
 $$
- This maximum transpiration is achieved when the gradient between soil $\psi_{s}$ and leaf $\psi_{l}$ water potential is maximum. That is, when the leaf potential is critical. Here we assume the critical leaf water potential as the potential at which 99.9% of conductivity loss would occur.
+
+$k_\mathrm{\psi_{crit}}$ can be expressed as:
+$$
+k_\mathrm{\psi_{crit}} = K_{max}\;(\frac{1}{2})^{(\frac{\psi_{crit}}{\psi_{50}})^b}
+$$
+
+
+Where $\psi_{crit}$ is the critical leaf water potential as the potential at which 99.9% of conductivity loss would occur.
+
 $$
 P(\psi) = \frac{1}{2} ^{(\frac{\psi}{\psi_{50}})^b}
 $$
@@ -462,28 +356,27 @@ $$
 if\; P(\psi) = 0.001 \;  then: \; \psi_{crit} = \psi_{50}(\frac{ln(1000)}{ln(2)} )^{(\frac{1}{b})}
 $$
 
-
-
-We can write now the ($1-E/E_{crit}$) in terms of water potentials and differential of water potentials.
-$$
-(1-\frac{E}{E_\mathrm{crit}}) = 1 - \frac{ K (\psi_\mathrm{s} - \psi_\mathrm{l})}{K (\psi_\mathrm{s} - \psi_\mathrm{crit})} =
- \frac{ (\psi_\mathrm{l} - \psi_\mathrm{crit})}{ (\psi_\mathrm{s} - \psi_\mathrm{crit})} = 1-\frac{ \Delta\psi}{ (\psi_\mathrm{s} - \psi_\mathrm{crit})}
-$$
+However we can assume that $k_\mathrm{\psi_{crit}} = 0$, which simplifies the optimization function.
 
 Which gives us the next expression that can be solved similarly as in the P Hydro analytical approximation, where each term is a function of the two independent variables $\chi$ and $\Delta \psi$.
 $$
-F = g_\mathrm{s}  c_\mathrm{a} (1-\chi) ( 1-\frac{ \Delta\psi}{ (\psi_\mathrm{s} - \psi_\mathrm{crit})}) - \alpha J_\mathrm{max} ( 1-\frac{ \Delta\psi}{ (\psi_\mathrm{s} - \psi_\mathrm{crit})})
+F = g_\mathrm{s}  c_\mathrm{a} (1-\chi) (\frac{K_{max}\;(\frac{1}{2})^{(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}}{k_\mathrm{\psi_s}}) - \alpha J_\mathrm{max}
+$$
+
+or:
+$$
+F = g_\mathrm{s}  c_\mathrm{a} (1-\chi) (K_{max}\;(\frac{1}{2})^{(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}) - \alpha J_\mathrm{max}k_\mathrm{\psi_s}
 $$
 
 Solved by $\chi$
 $$
-\frac{\partial F}{\partial \chi} = -g_s c_a( 1-\frac{ \Delta\psi}{ (\psi_\mathrm{s} - \psi_\mathrm{crit})}) -\alpha \frac{\partial J_\mathrm{max}}{\partial A_{Jm}} \frac{\partial A_{Jm}}{\partial \chi}( 1-\frac{ \Delta\psi}{ (\psi_\mathrm{s} - \psi_\mathrm{crit})}) = 0
+\frac{\partial F}{\partial \chi} = -g_s c_aK_{max}\;(\frac{1}{2})^{(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b} -\alpha \frac{\partial J_\mathrm{max}}{\partial A_{Jm}} \frac{\partial A_{Jm}}{\partial \chi}k_\mathrm{\psi_s} = 0
 $$
 
 Solved by $\Delta\psi$
 $$
-\frac{\partial F}{\partial \Delta\psi} = \frac{\partial g_s}{\partial \Delta\psi} c_a (1-\chi) -(\Delta\psi\frac{\partial g_s}{\partial \Delta\psi}+g_s)(\frac{c_a (1-\chi)}{(\psi_\mathrm{s} - \psi_\mathrm{crit})})-
-\alpha \frac{\partial J_\mathrm{max}}{\partial A_{Jm}} \frac{\partial A_{Jm}}{\partial \Delta\psi}+(\Delta\psi\frac{\partial J_\mathrm{max}}{\partial A_{Jm}} \frac{\partial A_{Jm}}{\partial \Delta\psi}+J_\mathrm{max})(\frac{\alpha}{(\psi_\mathrm{s} - \psi_\mathrm{crit})}) = 0
+\frac{\partial F}{\partial \Delta\psi} = \frac{\partial g_s}{\partial \Delta\psi} c_a \frac{ln(2)\;(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}{2\;(\Delta\psi + |\psi_s|)(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b} -\frac{\partial g_s}{\partial \Delta\psi} c_a\chi  \frac{ln(2)\;(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}{2\;(\Delta\psi + |\psi_s|)(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}-
+\alpha \frac{\partial J_\mathrm{max}}{\partial A_{Jm}} \frac{\partial A_{Jm}}{\partial \Delta\psi}k_\mathrm{\psi_s}= 0
 $$
 
 
@@ -501,8 +394,10 @@ e_crit = K * -integral_P_ecrit(psi_soil, par_plant$psi50, par_plant$b) #mol m-2 
 par %>% 
   split(seq(nrow(.))) %>% 
   purrr::map_df(function(x){
-    fn_profit_phydro_wang(x,
+    fn_profit_phydro_sox(x,
                  psi_soil = psi_soil, 
+                 e_crit = e_crit,
+                 p_crit = p_crit,
                  par_cost = par_cost, 
                  par_photosynth = par_photosynth, 
                  par_plant = par_plant, 
@@ -525,7 +420,7 @@ df_res1 %>%# filter(log(jmax) == 4)%>%
   # geom_text(x=2, y=-10, label="Example of the Profit surface \n with VPD = 1 kPa, psi soil = -0.01 MPa",
   #           family = "arial", fontface = "italic")+
   theme_classic()+
-  ylim(-2,1.2)+
+  # ylim(-2,1.2)+
   NULL -> f1
 
 psi_soil = -1
@@ -533,8 +428,10 @@ e_crit = K * -integral_P_ecrit(psi_soil, par_plant$psi50, par_plant$b) #mol m-2 
 par %>% 
   split(seq(nrow(.))) %>% 
   purrr::map_df(function(x){
-    fn_profit_phydro_wang(x,
+    fn_profit_phydro_sox(x,
                  psi_soil = psi_soil, 
+                 e_crit = e_crit,
+                 p_crit = p_crit,
                  par_cost = par_cost, 
                  par_photosynth = par_photosynth, 
                  par_plant = par_plant, 
@@ -554,7 +451,7 @@ df_res2 %>%
   # geom_text(x=2, y=-10, label="Example of the Profit surface \n with VPD = 1 kPa, psi soil = -1.5 MPa",
   #           family = "arial", fontface = "italic")+
   theme_classic()+
-    ylim(-2,1.2)+
+    ylim(-2,1.3)+
   NULL -> f2
 
 
@@ -563,8 +460,10 @@ e_crit = K * -integral_P_ecrit(psi_soil, par_plant$psi50, par_plant$b) #mol m-2 
 par %>% 
   split(seq(nrow(.))) %>% 
   purrr::map_df(function(x){
-    fn_profit_phydro_wang(x,
+    fn_profit_phydro_sox(x,
                  psi_soil = psi_soil, 
+                 e_crit = e_crit,
+                 p_crit = p_crit,
                  par_cost = par_cost, 
                  par_photosynth = par_photosynth, 
                  par_plant = par_plant, 
@@ -589,11 +488,14 @@ df_res3 %>%
 
 
 psi_soil = -3
+e_crit = K * -integral_P_ecrit(psi_soil, par_plant$psi50, par_plant$b) #mol m-2 (ground) s-1
 par %>% 
   split(seq(nrow(.))) %>% 
   purrr::map_df(function(x){
-    fn_profit_phydro_wang(x,
+    fn_profit_phydro_sox(x,
                  psi_soil = psi_soil, 
+                 e_crit = e_crit,
+                 p_crit = p_crit,
                  par_cost = par_cost, 
                  par_photosynth = par_photosynth, 
                  par_plant = par_plant, 
@@ -606,9 +508,6 @@ par %>%
 df_res4 <- res %>% cbind(par)
 
 df_res4 %>% 
-  # filter(out_e>0 & out >= 0 ) %>%
-  # mutate(out = case_when(out_e<0 & out >= 0 ~ 0,
-  #                        TRUE ~ out))%>%
   ggplot()+
   geom_point(aes(dpsi,out, color = jmax))+
   geom_vline(aes(xintercept=df_res4[which(df_res4$out == df_res4$out %>% max(na.rm = TRUE)),"dpsi"]), linetype = 2)+
@@ -616,7 +515,7 @@ df_res4 %>%
   # geom_text(x=2, y=-10, label="Example of the Profit surface \n with VPD = 1 kPa, psi soil = -1.5 MPa",
   #           family = "arial", fontface = "italic")+
   theme_classic()+
-  ylim(-2,1.2)+
+    ylim(-2,1.2)+
   NULL -> f4
 
 cowplot::plot_grid(f1,f2,f3,f4, labels = "auto")
@@ -675,7 +574,7 @@ cowplot::plot_grid(f5,f6,f7,f8, labels = "auto")
 
 ```
 
-Notice that as the soil dries out, the maximum is less clear. In this approach, the leaf potential values cannot be lower than the critical value. This must be limited in some way in the optimisation. In the numerical version I have figured it out, but I don't know if it is possible to do the same analytically. We can also see that at a given $\psi_s$, optimisation will occur at higher values of $\Delta\psi$ with values of jmax tending to infinity. This implies that jmax should be limited. Would it make sense to set the upper limit of jmax to the value when $\psi_s$ = 0? (At the moment this is what I have done)
+
 
 ```{r echo=F}
 plot_all = function(df_w_vol, varname, ref=NULL){
@@ -691,7 +590,7 @@ plot_all = function(df_w_vol, varname, ref=NULL){
   ggplot() +
     my_theme()+
   geom_line(aes(x = var, y = out_hydraulics_vcmax), col="green3", size=1) +
-  geom_line(aes(x = var, y = out_analytical_vcmax ), col="grey", size=1) +
+  # geom_line(aes(x = var, y = out_analytical_vcmax ), col="grey", size=1) +
   expand_limits(y=0)+
     xlab(varname)+
     ylab(expression(atop(V["cmax"],"("*mu*"mol/m"^2*"/s)")))
@@ -700,7 +599,6 @@ p2 <- df_w_vol %>%
   ggplot() +
     my_theme()+
   geom_line(aes(x = var, y = out_hydraulics_dpsi), col="blue", size=1)+
-  geom_line(aes(x = var, y = out_analytical_dpsi ), col="grey", size=1) +
   expand_limits(y=0)+
     xlab(varname)+
   ylab(expression(atop(Delta*psi,"(MPa)")))
@@ -709,7 +607,7 @@ p3 <- df_w_vol %>%
   ggplot() +
   my_theme()+
   geom_line(aes(x = var, y = out_hydraulics_gs), col="cyan2", size=1)+
-  geom_line(aes(x = var, y = out_analytical_gs), col="grey", size=1)+
+  # geom_line(aes(x = var, y = out_analytical_gs), col="grey", size=1)+
   expand_limits(y=0)+
     xlab(varname)+
   ylab(expression(atop(g[s],"(mol/m"^2*"/s)")))
@@ -718,7 +616,7 @@ p4 <- df_w_vol %>%
   ggplot() +
     my_theme()+
   geom_line(aes(x = var, y = out_hydraulics_chi), col="magenta", size=1)+
-  geom_line(aes(x = var, y = out_analytical_chi), col="grey", size=1)+
+  # geom_line(aes(x = var, y = out_analytical_chi), col="grey", size=1)+
   # geom_line(aes(x = var, y = out_hydraulics_chi_jmax_lim), col="violet", size=0.5)+
   expand_limits(y=0)+
     xlab(varname)+
@@ -727,7 +625,7 @@ p4 <- df_w_vol %>%
 p5 <- df_w_vol %>%
   ggplot() +
     my_theme()+
-  geom_line(aes(x = var, y = out_analytical_jmax), col="grey", size=1) +
+  # geom_line(aes(x = var, y = out_analytical_jmax), col="grey", size=1) +
   geom_line(aes(x = var, y = out_hydraulics_jmax), col="goldenrod1", size=1) +
   expand_limits(y=0)+
   xlab(varname)+
@@ -737,7 +635,7 @@ p6 <- df_w_vol %>%
   ggplot() +
     my_theme()+
   geom_line(aes(x = var, y = out_hydraulics_a), col="green4", size=1) +
-  geom_line(aes(x = var, y = out_analytical_a), col="grey",size=1) +
+  # geom_line(aes(x = var, y = out_analytical_gpp), col="grey",size=1) +
   expand_limits(y=0)+
     xlab(varname)+
   ylab(expression(atop(A,"("*mu*"mol/m"^2*"/s)")))
@@ -767,7 +665,7 @@ if (!is.null(ref)){
 Here I show the simulations for the soil potential gradient. The plant have a $\psi_{50}$ = -3.46 a slope parameter of 6.55 and a $K$ of 3e-17
 ```{r,echo=FALSE}
 
-# phydro_wang_bf <- function(x){
+# phydro_sox_bf <- function(x){
 #     psi_soil <- x
 #     jmax <- seq(1,5,0.2)
 #     pl <- seq(0.02,3.4,0.02)
@@ -776,7 +674,7 @@ Here I show the simulations for the soil potential gradient. The plant have a $\
 #     par %>% 
 #     split(seq(nrow(.))) %>% 
 #     purrr::map_df(function(y){
-#     fn_profit_phydro_wang(y,
+#     fn_profit_phydro_sox(y,
 #                  psi_soil = psi_soil, 
 #                  e_crit = e_crit,
 #                  par_cost = par_cost, 
@@ -792,15 +690,11 @@ Here I show the simulations for the soil potential gradient. The plant have a $\
 # }
 
 # dat_soilm_numerical = tibble(var=seq(-5,0,length.out=10)) %>% 
-#   mutate(out_hydraulics = purrr::map(var, ~phydro_wang_bf(.)) ) %>%
+#   mutate(out_hydraulics = purrr::map(var, ~phydro_sox_bf(.)) ) %>%
 #   unnest_wider(out_hydraulics, names_sep = "_")
-
-
-dat_soilm_numerical = tibble(var=seq(p_crit,0,length.out=20)) %>% 
-  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_wang_test(tc = 25, ppfd = 400, vpd = 1000, co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = .,  par_plant = list(conductivity = 1e-16,psi50 = -1.46, b=1.05), rdark = 0.02, par_cost = list(alpha=0.095))),
-         out_analytical = purrr::map(var, ~calc_phydro_test(tc = 25, ppfd = 400, vpd = 1000, co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = .,  par_plant = list(conductivity = 1e-16,psi50 = -1.46, b=1), rdark = 0.02, par_cost = list(alpha = 0.1, gamma = 1)))) %>%
-  unnest_wider(out_hydraulics, names_sep = "_")%>%
-  unnest_wider(out_analytical, names_sep = "_")
+dat_soilm_numerical = tibble(var=seq(-5,0,length.out=20)) %>% 
+  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_sox_test(tc = 25, ppfd = 400, vpd = 1000, co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = .,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.1)))) %>%
+  unnest_wider(out_hydraulics, names_sep = "_")
 
 
 l1= dat_soilm_numerical %>% 
@@ -809,17 +703,15 @@ l1= dat_soilm_numerical %>%
 cowplot::plot_grid(plotlist = l1, labels="", label_size = 16, label_colour = "grey50", label_x = 0.3, hjust = 0, align = "hv", rel_widths = 1, nrow=3, byrow=T)
 ```
 
-One can see that there are some problems with the optimization close to $\psi_{crit}$. $\Delta\psi$ is optimised at the maximum possible value ($\psi_s-\psi_{crit}$) and $J_{max}$ = is $J_{max}(\psi_{s0})$.   Any idea?
-
 And here the simulations for VPD. Lines are simulations with $\psi_s$ equal to -1 MPa and dots -3 MPa.
 ```{r,echo=FALSE}
 
 dat_vpd_numerical = tibble(var=seq(100,3000,length.out=20)) %>% 
-  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_wang_test(tc = 25, ppfd = 400, vpd = ., co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = -1,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.1)))) %>%
+  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_sox_test(tc = 25, ppfd = 400, vpd = ., co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = -1,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.1)))) %>%
   unnest_wider(out_hydraulics, names_sep = "_")
 
 dat_vpd2_numerical = tibble(var=seq(100,3000,length.out=20)) %>% 
-  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_wang_test(tc = 25, ppfd = 400, vpd = ., co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = -3,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.1)))) %>%
+  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_sox_test(tc = 25, ppfd = 400, vpd = ., co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = -3,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.1)))) %>%
   unnest_wider(out_hydraulics, names_sep = "_")
 
 
