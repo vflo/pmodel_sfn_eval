@@ -27,25 +27,60 @@ fn_profit <- function(par, psi_soil, par_cost, e_crit, p_crit, par_photosynth,
   
   ## wang
   if(stomatal_model == "phydro_wang"){
-    
+    cost = (par_cost$alpha*jmax) #umolco2 umolh2o m-2 s-1
+    e_e_crit = -integral_P_e_ecrit(dpsi, psi_soil, par_plant$psi50,par_plant$b)
+    out_ecrit = (a-cost)
+    out_e = (a-cost)*e_e_crit
+    out = out_ecrit-out_e
+    if(out_e>=out_ecrit){out = 0}
+  }
+  
+  ## wang instantaneous simplificated
+  if(stomatal_model == "phydro_wang_inst_simple"){
+    cost = (par_cost$alpha*jmax) #umolco2 umolh2o m-2 s-1
+    e_e_crit = -integral_P_e_ecrit(dpsi, psi_soil, par_plant$psi50,par_plant$b)
+    out_ecrit = (a-cost)
+    out_e = (a-cost)*e_e_crit
+    out = out_ecrit-out_e
+    if(out_e>=out_ecrit){out = 0}
+  }
+  
+  ## wang modificated
+  if(stomatal_model == "phydro_wang_mod"){
     cost = (par_cost$alpha*jmax) #umolco2 umolh2o m-2 s-1
     e_e_crit = -integral_P_e_ecrit(dpsi, psi_soil, par_plant$psi50,par_plant$b)
     out_e = a * e_e_crit
     out = a - out_e - cost + 1
-    # if(cost>a){out = 0}
-    # out_ecrit = (a-cost)
-    # out_e = (a-cost)*e_e_crit
-    # out = out_ecrit-out_e
-    # if(out_e>=out_ecrit){out = 0}
   }
   
-  # ## cmax
-  # if(stomatal_model == "phydro_cmax"){
-  #   aa         = par_cost$aa
-  #   bb         = par_cost$bb
-  #   p = psi_leaf
-  #   out <- (a - aa*p**2.0 - bb*p) - (par_cost$alpha * jmax)
-  # }
+  # Least-cost
+  if(stomatal_model == "phydro_least_cost"){
+    out = (a-par_cost$alpha*jmax)/(par_cost$gamma*e+jmax)
+  }
+  
+  #CGain
+  if(stomatal_model == "phydro_cgain"){
+    K      = scale_conductivity(par_plant$conductivity, par_env)  #mol m-2 (ground) s-1 MPa-1
+    kl     = K*(1/2)^((psi_leaf/par_plant$psi50)^par_plant$b)
+    ks     = K*(1/2)^((psi_soil/par_plant$psi50)^par_plant$b)
+    out = (a- par_cost$alpha*jmax) - ((a- par_cost$alpha*jmax)*par_cost$gamma*(K-kl)/K)  #modified version
+    # out = a - (par_cost$gamma*((K-kl)/K)) - par_cost$alpha*jmax
+    # if (A<(par_cost$alpha * jmax)){profit <- 0}
+  }
+  
+  # WUE
+  if(stomatal_model == "phydro_wue"){
+    out = ((a - par_cost$alpha*jmax)-(par_cost$gamma*e))
+    if (a<(par_cost$alpha * jmax)){out <- 0}
+  }
+
+  ## cmax
+  if(stomatal_model == "phydro_cmax"){
+    aa         = par_cost$aa
+    bb         = par_cost$bb
+    p = psi_leaf
+    out <- (a - aa*p**2.0 - bb*p) - (par_cost$alpha * jmax)
+  }
   
   ## sperry
   if(stomatal_model == "phydro_sperry"){
@@ -66,7 +101,7 @@ fn_profit <- function(par, psi_soil, par_cost, e_crit, p_crit, par_photosynth,
     risk   = (ks-kl)/(ks-k_crit)
     cost   = (par_cost$alpha * jmax)
     # amax   = max(unlist(list_a))
-    out <- a/amax - risk - cost + 10
+    out <- a/amax - risk - cost 
   }
   
   ## SOX
@@ -76,17 +111,40 @@ fn_profit <- function(par, psi_soil, par_cost, e_crit, p_crit, par_photosynth,
     kl         = K*(1/2)^(psi_leaf/par_plant$psi50)^par_plant$b
     k_crit     = 0
     reduction_factor = (kl - k_crit)/(K - k_crit)
-    out <- (a)*reduction_factor-(par_cost$alpha * jmax)+10
+    out <- (a-(par_cost$alpha * jmax))*reduction_factor
+    if (a<(par_cost$alpha * jmax)){out <- 0}
   }
   
-  ## SOX
+  ## SOX instantaneous simple
+  if(stomatal_model == "phydro_sox_inst_simple"){
+    K          = scale_conductivity(par_plant$conductivity, par_env)  #mol m-2 (ground) s-1 MPa-1
+    ks         = K*(1/2)^(psi_soil/par_plant$psi50)^par_plant$b
+    kl         = K*(1/2)^(psi_leaf/par_plant$psi50)^par_plant$b
+    k_crit     = 0
+    reduction_factor = (kl - k_crit)/(K - k_crit)
+    out <- (a-(par_cost$alpha * jmax))*reduction_factor
+    if (a<(par_cost$alpha * jmax)){out <- 0}
+  }
+  
+  ## SOX mod
   if(stomatal_model == "phydro_sox_mod"){
     K          = scale_conductivity(par_plant$conductivity, par_env)  #mol m-2 (ground) s-1 MPa-1
     ks         = K*(1/2)^(psi_soil/par_plant$psi50)^par_plant$b
     kl         = K*(1/2)^(psi_leaf/par_plant$psi50)^par_plant$b
     k_crit     = 0
+    reduction_factor = (kl - k_crit)/(K - k_crit)
+    out <- (a)*reduction_factor - (par_cost$alpha * jmax)
+    if (a<(par_cost$alpha * jmax)){out <- 0}
+  }
+  
+  ## SOX alternative
+  if(stomatal_model == "phydro_sox_alt"){
+    K          = scale_conductivity(par_plant$conductivity, par_env)  #mol m-2 (ground) s-1 MPa-1
+    ks         = K*(1/2)^(psi_soil/par_plant$psi50)^par_plant$b
+    kl         = K*(1/2)^(psi_leaf/par_plant$psi50)^par_plant$b
+    k_crit     = 0
     reduction_factor = (kl - k_crit)/(ks - k_crit)
-    out <- (a)*reduction_factor-(par_cost$alpha * jmax)+10
+    out <- (a)*reduction_factor-(par_cost$alpha * jmax)
   }
   
   if (do_optim){
@@ -113,24 +171,55 @@ fn_profit_inst_schemes <- function(par, jmax, vcmax, psi_soil, e_crit, p_crit, p
   
   ## wang
   if(stomatal_model == "phydro_wang"){
+    cost = (par_cost$alpha*jmax) #umolco2 umolh2o m-2 s-1
     e_e_crit = -integral_P_e_ecrit(dpsi, psi_soil, par_plant$psi50,par_plant$b)
-    profit = A*(1-e_e_crit)
-    # cost = (par_cost$alpha*jmax) #umolco2 umolh2o m-2 s-1
-    # e_e_crit = -integral_P_e_ecrit(dpsi, psi_soil, par_plant$psi50,par_plant$b)
-    # out_ecrit = (A-cost)
-    # out_e = (A-cost)*e_e_crit
-    # out = out_ecrit-out_e
-    # if(out_e>=out_ecrit){out = 0}
-    # profit <- out
+    out_ecrit = (A-cost)
+    out_e = (A-cost)*e_e_crit
+    out = out_ecrit-out_e
+    if(out_e>=out_ecrit){out = 0}
+    profit <- out
   }
   
-  # ## cmax
-  # if(stomatal_model == "phydro_cmax"){
-  #   aa         = par_cost$aa
-  #   bb         = par_cost$bb
-  #   p = psi_leaf
-  #   profit <- (A - aa*p**2.0 - bb*p)
-  # }
+  ## wang instantaneous simplificated
+  if(stomatal_model == "phydro_wang_inst_simple"){
+    e_e_crit = -integral_P_e_ecrit(dpsi, psi_soil, par_plant$psi50,par_plant$b)
+    profit = A*(1-e_e_crit)
+  }
+  
+  ## wang modificated
+  if(stomatal_model == "phydro_wang_mod"){
+    e_e_crit = -integral_P_e_ecrit(dpsi, psi_soil, par_plant$psi50,par_plant$b)
+    profit = A*(1-e_e_crit)
+  }
+  
+  ## Least-cost #Doesn't work because of jmax in A and as cost.
+  if(stomatal_model == "phydro_least_cost"){
+    profit = (A-par_cost$alpha*jmax)/(par_cost$gamma*e+jmax)
+  }
+  
+  ## CGain
+  if(stomatal_model == "phydro_cgain"){
+    K      = scale_conductivity(par_plant$conductivity, par_env)  #mol m-2 (ground) s-1 MPa-1
+    kl     = K*(1/2)^((psi_leaf/par_plant$psi50)^par_plant$b)
+    ks     = K*(1/2)^((psi_soil/par_plant$psi50)^par_plant$b)
+    profit = (A- par_cost$alpha*jmax) - ((A - par_cost$alpha*jmax)*par_cost$gamma*(K-kl)/K) 
+    # profit = A - (A*par_cost$gamma*(K-kl)/K)  #modified version
+    # profit = A - (par_cost$gamma*((K-kl)/K))
+  }
+
+  ## WUE
+  if(stomatal_model == "phydro_wue"){
+    profit = ((A - par_cost$alpha*jmax)- (par_cost$gamma*e))
+    if (A<(par_cost$alpha * jmax)){profit <- 0}
+  }
+
+  ## cmax
+  if(stomatal_model == "phydro_cmax"){
+    aa         = par_cost$aa
+    bb         = par_cost$bb
+    p = psi_leaf
+    profit <- (A - aa*p**2.0 - bb*p)
+  }
   
   ## sperry
   if(stomatal_model == "phydro_sperry"){
@@ -161,11 +250,32 @@ fn_profit_inst_schemes <- function(par, jmax, vcmax, psi_soil, e_crit, p_crit, p
     kl         = K*(1/2)^(psi_leaf/par_plant$psi50)^par_plant$b
     k_crit     = 0
     reduction_factor = (kl - k_crit)/(K - k_crit)
+    profit <- (A-(par_cost$alpha * jmax))*reduction_factor
+    if (A<(par_cost$alpha * jmax)){profit <- 0}
+  }
+  
+  ## SOX instantaneous simple
+  if(stomatal_model == "phydro_sox_inst_simple"){
+    K          = scale_conductivity(par_plant$conductivity, par_env)  #mol m-2 (ground) s-1 MPa-1
+    ks         = K*(1/2)^(psi_soil/par_plant$psi50)^par_plant$b
+    kl         = K*(1/2)^(psi_leaf/par_plant$psi50)^par_plant$b
+    k_crit     = 0
+    reduction_factor = (kl - k_crit)/(K - k_crit)
+    profit <- (A)*reduction_factor+100
+  }
+  
+  ## SOX mod
+  if(stomatal_model == "phydro_sox_mod"){
+    K          = scale_conductivity(par_plant$conductivity, par_env)  #mol m-2 (ground) s-1 MPa-1
+    ks         = K*(1/2)^(psi_soil/par_plant$psi50)^par_plant$b
+    kl         = K*(1/2)^(psi_leaf/par_plant$psi50)^par_plant$b
+    k_crit     = 0
+    reduction_factor = (kl - k_crit)/(K - k_crit)
     profit <- (A)*reduction_factor
   }
   
-  ## SOX
-  if(stomatal_model == "phydro_sox_mod"){
+  ## SOX alternative
+  if(stomatal_model == "phydro_sox_alt"){
     K          = scale_conductivity(par_plant$conductivity, par_env)  #mol m-2 (ground) s-1 MPa-1
     ks         = K*(1/2)^(psi_soil/par_plant$psi50)^par_plant$b
     kl         = K*(1/2)^(psi_leaf/par_plant$psi50)^par_plant$b
@@ -218,9 +328,13 @@ optimise_shortterm_schemes <- function(fn_profit_inst, jmax, vcmax, psi_soil, e_
                                par_cost, par_photosynth, par_plant, par_env, 
                                stomatal_model, return_all = FALSE, do_optim){
   
+  # dpsi_ini = (psi_soil - p_crit)/2
+  # dpsi_ini = 0.01
+  # dpsi_ini = 0.5
+  dpsi_ini = 1
   out_optim <- optimr::optimr(
-    par       = c(dpsi=0.5),  
-    lower     = c(.0001),
+    par       = c(dpsi=dpsi_ini),  
+    lower     = c(.000001),
     upper     = c(10),
     fn        = fn_profit_inst,
     psi_soil  = psi_soil,
@@ -235,7 +349,7 @@ optimise_shortterm_schemes <- function(fn_profit_inst, jmax, vcmax, psi_soil, e_
     do_optim  = do_optim, 
     stomatal_model = stomatal_model,
     method    = "L-BFGS-B",
-    control   = list(maxit = 500, maximize = TRUE, fnscale = 1e2) 
+    control   = list(maxit = 500, maximize = TRUE) 
   )
   
   out_optim$value <- -out_optim$value
@@ -273,8 +387,7 @@ model_numerical <- function(tc, ppfd, vpd, co2, elv, fapar, kphio, psi_soil,
     vpd             = vpd
   )
   
-  #Phydro/phydro_cmax/phydro_sperry/phydro_sox
-  if(stomatal_model %in% c("phydro", 'phydro_sperry',"phydro_sox","phydro_sox_mod","phydro_wang")){
+
     K      = scale_conductivity(par_plant$conductivity, par_env) #mol m-2 (ground) s-1 MPa-1
     p_crit = par_plant$psi50 * (log(1000)/log(2)) ^ ( 1/par_plant$b)
     e_crit = K * -integral_P_ecrit(psi_soil, par_plant$psi50, par_plant$b) #mol m-2 (ground) s-1
@@ -286,7 +399,7 @@ model_numerical <- function(tc, ppfd, vpd, co2, elv, fapar, kphio, psi_soil,
     #   low_swp  = TRUE
     #   print("WARNING: soil water potential is lower than critical plant water potential.")
     # }
-    
+
     # 3. Optimizer
     lj_dps = optimise_stomata_phydro_schemes(fn_profit, 
                                              psi_soil = psi_soil,
@@ -325,7 +438,6 @@ model_numerical <- function(tc, ppfd, vpd, co2, elv, fapar, kphio, psi_soil,
       vcmax        = vcmax,
       chi_jmax_lim = 0
     ))
-  }
 }
 
 
