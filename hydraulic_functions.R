@@ -46,6 +46,25 @@ scale_conductivity = function(K, par_env){
   return(K4)  
 }
 
+calc_dpsi_phydro <- function (gs, psi_soil, par_plant, par_env, ...){
+  K = scale_conductivity(par_plant$conductivity, par_env) #mol m-2 (leaf) s-1 MPa-1
+  D = (par_env$vpd/par_env$patm)
+  P50 = par_plant$psi50
+  b = par_plant$b
+  
+  #calculate dpsi using the inverse function of the incomplete gamma function
+  l2 = log(2)
+  int_P = -gs*1.6*D/K
+  int_s = integral_P_soil(psi_soil,P50, b)
+  inst_l_gamma = (int_s + int_P)/(-(P50/b)*(l2^(-1/b)))
+  
+  # psi_l = P50*log(-1/b)*2*(-log(inst_l))^(1/par_plant$b)
+  pl_ = zipfR::Igamma.inv(a = 1/b, y = inst_l_gamma,lower = FALSE)
+  pl = (pl_/l2)^(1/b)
+  dpsi = psi_soil - pl*P50 # dpsi in MPa
+  dpsi
+}
+
 calc_gs_phydro <- function (dpsi, psi_soil, par_plant, par_env, ...){
   K = scale_conductivity(par_plant$conductivity, par_env) #mol m-2 (leaf) s-1 MPa-1
   # K = K * par_plant$pl_sapw_area/par_plant$pl_ba*par_plant$st_basal_area*1e-4 #kg m-2 (ground) s-1 MPa-1
@@ -95,14 +114,7 @@ integral_P_soil <- function(psi_soil, psi50, b, ...){
   l2 = log(2)
   ps_ = l2*ps^b
   
-  expint::gammainc(a = 1/b, x = ps_)/expint::gammainc(a = 1/b, x = 0)
-}
-
-integral_P_leaf <- function(psi_soil, psi50, b, ...){
-  pl = (psi_soil-dpsi)/psi50
-  l2 = log(2)
-  pl_ = l2*pl^b
-  expint::gammainc(a = 1/b, x = pl_)/expint::gammainc(a = 1/b, x = 0)
+  -(psi50/b)*(l2^(-1/b))*expint::gammainc(a = 1/b, x = ps_)
 }
 
 get_p <- function(psi_soil, e, K, d, c, h, dens_water) {
