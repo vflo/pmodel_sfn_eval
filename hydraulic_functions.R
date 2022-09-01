@@ -56,7 +56,9 @@ calc_dpsi_phydro <- function (gs, psi_soil, par_plant, par_env, ...){
   l2 = log(2)
   int_P = -gs*1.6*D/K
   int_s = integral_P_soil(psi_soil,P50, b)
-  inst_l_gamma = (int_s + int_P)/(-(P50/b)*(l2^(-1/b)))
+  int_l = (int_s + int_P)
+  if(int_l<0){int_l = 0}
+  inst_l_gamma = int_l/(-(P50/b)*(l2^(-1/b)))
   
   # psi_l = P50*log(-1/b)*2*(-log(inst_l))^(1/par_plant$b)
   pl_ = zipfR::Igamma.inv(a = 1/b, y = inst_l_gamma,lower = FALSE)

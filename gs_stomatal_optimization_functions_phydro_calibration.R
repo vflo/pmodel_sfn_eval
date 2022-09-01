@@ -1,20 +1,23 @@
 ###########################################
 ## PHYDRO SCHEMES
 ###########################################
-fn_profit <- function(par, psi_soil, par_cost, e_crit, p_crit, par_photosynth, 
+fn_profit_gs <- function(par, psi_soil, par_cost, e_crit, p_crit, par_photosynth, 
                       par_plant, par_env, do_optim = FALSE, stomatal_model){
   jmax = exp(par[1])  # Jmax in umol/m2/s (logjmax is supplied by the optimizer)
-  dpsi = par[2]#      # delta Psi in MPa
-  psi_leaf = psi_soil-dpsi #MPa
-  
-  gs = calc_gs_phydro(dpsi, psi_soil, par_plant, par_env)   # gs in mol/m2ground/s
+  gs = par[2]#      # delta Psi in MPa
   e  = 1.6*gs*(par_env$vpd/par_env$patm)         # E in mol/m2ground/s
-  
+  dpsi    = calc_dpsi_phydro(gs, psi_soil, par_plant, par_env) # dpsi in MPa
+  psi_leaf = psi_soil-dpsi  # leaf water potential
+  # if(jmax<=0|jmax>1e5|
+  #    gs > 10|gs<=0|
+  #    psi_leaf<p_crit){
+  #   out <- -1e20
+  #   }else{
   ## light-limited assimilation
-  a_j   <- calc_assim_light_limited(gs, jmax, par_photosynth) # Aj in umol/m2ground/s
-  a     = a_j$a
-  ci    = a_j$ci
-  vcmax = calc_vcmax_coordinated_numerical(a, ci, par_photosynth)
+    a_j   <- calc_assim_light_limited(gs, jmax, par_photosynth) # Aj in umol/m2ground/s
+    a     = a_j$a
+    ci    = a_j$ci
+    vcmax = calc_vcmax_coordinated_numerical(a, ci, par_photosynth)
   
   ## dummy cost
   dummy_costs = 0*exp(20*(-abs(dpsi/4)-abs(jmax/1))) # ONLY added near (0,0) for numerical stability.
@@ -55,7 +58,7 @@ fn_profit <- function(par, psi_soil, par_cost, e_crit, p_crit, par_photosynth,
   
   # Least-cost
   if(stomatal_model == "phydro_least_cost"){
-    out = exp(a/(par_cost$gamma*e+jmax))
+    out = (a-par_cost$alpha*jmax)/(par_cost$gamma*e+jmax)
   }
   
   #CGain
@@ -63,9 +66,8 @@ fn_profit <- function(par, psi_soil, par_cost, e_crit, p_crit, par_photosynth,
     K      = scale_conductivity(par_plant$conductivity, par_env)  #mol m-2 (ground) s-1 MPa-1
     kl     = K*(1/2)^((psi_leaf/par_plant$psi50)^par_plant$b)
     ks     = K*(1/2)^((psi_soil/par_plant$psi50)^par_plant$b)
-    out = exp(a - par_cost$alpha*jmax - par_cost$gamma*(K-kl)/K)
+    out = (a- par_cost$alpha*jmaxpar_cost$gamma*(K-kl)/K) 
   }
-
   
   ## CGain2
   if(stomatal_model == "phydro_cgain2"){
@@ -78,11 +80,11 @@ fn_profit <- function(par, psi_soil, par_cost, e_crit, p_crit, par_photosynth,
     out = ((a - par_cost$alpha*jmax)-(par_cost$gamma*e))
     if (a<(par_cost$alpha * jmax)){out <- 0}
   }
-
+  
   ## cmax
   if(stomatal_model == "phydro_cmax"){
-    aa         = par_cost$gamma
-    bb         = 1
+    aa         = par_cost$aa
+    bb         = par_cost$bb
     p = psi_leaf
     out <- (a - aa*p**2.0 - bb*p) - (par_cost$alpha * jmax)
   }
@@ -151,7 +153,7 @@ fn_profit <- function(par, psi_soil, par_cost, e_crit, p_crit, par_photosynth,
     reduction_factor = (kl - k_crit)/(ks - k_crit)
     out <- (a)*reduction_factor-(par_cost$alpha * jmax)
   }
-  
+  # }
   if (do_optim){
     return(-out)
   } else {
@@ -159,17 +161,16 @@ fn_profit <- function(par, psi_soil, par_cost, e_crit, p_crit, par_photosynth,
   }
 }
 
-fn_profit_inst_schemes <- function(par, jmax, vcmax, psi_soil, e_crit, p_crit, par_cost, 
+fn_profit_inst_schemes_gs <- function(par, jmax, vcmax, psi_soil, e_crit, p_crit, par_cost, 
                                    par_photosynth, par_plant, par_env, 
                                    stomatal_model, do_optim){
-  dpsi = par[1]#      # delta Psi in MPa
-  psi_leaf = psi_soil-dpsi #MPa
-
-  gs = calc_gs_phydro(dpsi, psi_soil, par_plant, par_env)  # gs in mol/m2/s/Mpa
+  gs = par[1]#      # gs in mol m-2 (ground) s-1
   e  = 1.6*gs*(par_env$vpd/par_env$patm)         # E in mol/m2ground/s
   A = calc_assimilation_limiting(vcmax, jmax, gs, par_photosynth)$a
+  dpsi    = calc_dpsi_phydro(gs, psi_soil, par_plant, par_env) # dpsi in MPa
+  psi_leaf = psi_soil-dpsi  # leaf water potential
 
-  ## phydro
+  
   if(stomatal_model == "phydro"){
     profit = A - par_cost$gamma * dpsi^2 
   }
@@ -202,16 +203,16 @@ fn_profit_inst_schemes <- function(par, jmax, vcmax, psi_soil, e_crit, p_crit, p
   
   ## Least-cost #Doesn't work because of jmax in A and as cost.
   if(stomatal_model == "phydro_least_cost"){
-    profit = exp(A/(par_cost$gamma*e+jmax))
+    profit = (A-par_cost$alpha*jmax)/(par_cost$gamma*e+jmax)
   }
   
   ## CGain
   if(stomatal_model == "phydro_cgain"){
     K      = scale_conductivity(par_plant$conductivity, par_env)  #mol m-2 (ground) s-1 MPa-1
     kl     = K*(1/2)^((psi_leaf/par_plant$psi50)^par_plant$b)
-    profit = exp(A - par_cost$alpha*jmax - par_cost$gamma*(K-kl)/K)
+    profit = A - par_cost$alpha*jmax - (par_cost$gamma*(K-kl)/K) 
   }
-
+  
   ## CGain2
   if(stomatal_model == "phydro_cgain2"){
     K      = scale_conductivity(par_plant$conductivity, par_env)  #mol m-2 (ground) s-1 MPa-1
@@ -224,13 +225,13 @@ fn_profit_inst_schemes <- function(par, jmax, vcmax, psi_soil, e_crit, p_crit, p
     profit = ((A - par_cost$alpha*jmax)- (par_cost$gamma*e))
     if (A<(par_cost$alpha * jmax)){profit <- 0}
   }
-
+  
   ## cmax
   if(stomatal_model == "phydro_cmax"){
-    aa         = par_cost$gamma
-    bb         = 1
+    aa         = par_cost$aa
+    bb         = par_cost$bb
     p = psi_leaf
-    profit <- exp(A - aa*p**2.0 - bb*p)
+    profit <- (A - aa*p**2.0 - bb*p)
   }
   
   ## sperry
@@ -300,7 +301,6 @@ fn_profit_inst_schemes <- function(par, jmax, vcmax, psi_soil, e_crit, p_crit, p
     profit = exp(profit)
   }
   
-  
   if (do_optim){
     return(-profit)
   } else {
@@ -309,15 +309,17 @@ fn_profit_inst_schemes <- function(par, jmax, vcmax, psi_soil, e_crit, p_crit, p
 }
 
 
-optimise_stomata_phydro_schemes <- function(fn_profit, psi_soil, par_cost, e_crit, p_crit, par_photosynth, 
+optimise_stomata_phydro_schemes_gs <- function(fn_profit_gs, psi_soil, par_cost, e_crit, p_crit, par_photosynth, 
                                             par_plant, par_env, jmax_lim, return_all = FALSE, do_optim=TRUE, stomatal_model){
   if(is.null(jmax_lim)){jmax_lim = 7}
   
   out_optim <- optimr::optimr(
-    par       = c(logjmax=0, dpsi=1),  
-    lower     = c(-10, .0001),
+  # out_optim <- dfoptim::nmkb(
+  # out_optim <- minqa::bobyqa(
+    par       = c(logjmax=0, gs=1e-3),  
+    lower     = c(-10, 1e-20),
     upper     = c(10, 10),
-    fn             = fn_profit,
+    fn             = fn_profit_gs,
     psi_soil       = psi_soil,
     e_crit         = e_crit,
     p_crit         = p_crit,
@@ -328,7 +330,7 @@ optimise_stomata_phydro_schemes <- function(fn_profit, psi_soil, par_cost, e_cri
     do_optim       = do_optim, 
     stomatal_model = stomatal_model,
     method         = "L-BFGS-B",
-    control        = list(maxit = 500, maximize = TRUE, fnscale = 1e2)
+    control        = list(maxit = 500, maximize = TRUE, fnscale = 1)
   )
   
   out_optim$value <- -out_optim$value
@@ -340,19 +342,15 @@ optimise_stomata_phydro_schemes <- function(fn_profit, psi_soil, par_cost, e_cri
   }
 }
 
-optimise_shortterm_schemes <- function(fn_profit_inst, jmax, vcmax, psi_soil, e_crit, p_crit,
+optimise_shortterm_schemes_gs <- function(fn_profit_inst_gs, jmax, vcmax, psi_soil, e_crit, p_crit,
                                par_cost, par_photosynth, par_plant, par_env, 
                                stomatal_model, return_all = FALSE, do_optim){
-  
-  # dpsi_ini = (psi_soil - p_crit)/2
-  # dpsi_ini = 0.01
-  # dpsi_ini = 0.5
-  dpsi_ini = 1
+
   out_optim <- optimr::optimr(
-    par       = c(dpsi=dpsi_ini),  
-    lower     = c(.000001),
+    par       = c(gs=1e-3),  
+    lower     = c(1e-20),
     upper     = c(10),
-    fn        = fn_profit_inst,
+    fn        = fn_profit_inst_gs,
     psi_soil  = psi_soil,
     jmax      = jmax,
     vcmax     = vcmax,
@@ -364,8 +362,8 @@ optimise_shortterm_schemes <- function(fn_profit_inst, jmax, vcmax, psi_soil, e_
     par_env   = par_env,
     do_optim  = do_optim, 
     stomatal_model = stomatal_model,
-    method    = "L-BFGS-B",
-    control   = list(maxit = 500, maximize = TRUE) 
+    method         = "L-BFGS-B",
+    control   = list(maxit = 500, maximize = TRUE, fnscale = 1) 
   )
   
   out_optim$value <- -out_optim$value
@@ -381,7 +379,7 @@ optimise_shortterm_schemes <- function(fn_profit_inst, jmax, vcmax, psi_soil, e_
 ###########################################
 ## MODEL OPTIMIZATION AND DATA PREPARATION
 ###########################################
-model_numerical <- function(tc, ppfd, vpd, co2, elv, fapar, kphio, psi_soil, 
+model_numerical_gs <- function(tc, ppfd, vpd, co2, elv, fapar, kphio, psi_soil, 
                             rdark, par_plant, par_cost, stomatal_model){
 
   patm = rpmodel::calc_patm(elv)
@@ -417,7 +415,7 @@ model_numerical <- function(tc, ppfd, vpd, co2, elv, fapar, kphio, psi_soil,
     # }
 
     # 3. Optimizer
-    lj_dps = optimise_stomata_phydro_schemes(fn_profit, 
+    lj_gs = optimise_stomata_phydro_schemes_gs(fn_profit_gs, 
                                              psi_soil = psi_soil,
                                              e_crit = e_crit,
                                              p_crit = p_crit,
@@ -431,10 +429,11 @@ model_numerical <- function(tc, ppfd, vpd, co2, elv, fapar, kphio, psi_soil,
                                              stomatal_model = stomatal_model)
   
     
-    jmax  = exp(lj_dps[1]) %>% unname()
-    dpsi  = lj_dps[2] %>% unname()
+    jmax  = exp(lj_gs[1]) %>% unname()
+    gs  = lj_gs[2] %>% unname()
+
+    dpsi    = calc_dpsi_phydro(gs, psi_soil, par_plant, par_env) # dpsi in MPa
     psi_l = psi_soil-dpsi
-    gs    = calc_gs_phydro(dpsi, psi_soil, par_plant, par_env) # gs in mol m-2 (ground) s-1
     a_j   = calc_assim_light_limited(gs = gs, jmax = jmax, par_photosynth = par_photosynth)
     a     = a_j$a
     ci    = a_j$ci
@@ -460,7 +459,7 @@ model_numerical <- function(tc, ppfd, vpd, co2, elv, fapar, kphio, psi_soil,
 ########################################################
 ## INSTANTANEOUS MODEL OPTIMIZATION AND DATA PREPARATION
 ########################################################
-model_numerical_instantaneous <- function(vcmax, jmax, tc, ppfd, vpd, co2, elv, fapar, 
+model_numerical_instantaneous_gs <- function(vcmax, jmax, tc, ppfd, vpd, co2, elv, fapar, 
                                           kphio, psi_soil,  rdark, par_plant, 
                                           par_cost, stomatal_model){
   
@@ -497,7 +496,7 @@ model_numerical_instantaneous <- function(vcmax, jmax, tc, ppfd, vpd, co2, elv, 
   # }
 
   # 3. Optimizer
-  lj_dps = optimise_shortterm_schemes(fn_profit_inst_schemes,
+  lj_gs = optimise_shortterm_schemes_gs(fn_profit_inst_schemes_gs,
                                       jmax = jmax, 
                                       vcmax = vcmax,
                                       psi_soil = psi_soil,
@@ -511,9 +510,10 @@ model_numerical_instantaneous <- function(vcmax, jmax, tc, ppfd, vpd, co2, elv, 
                                       do_optim = TRUE, 
                                       stomatal_model = stomatal_model)
   
-  dpsi  = lj_dps[1] %>% unname() # delta Psi in MPa
+  gs  = lj_gs[1] %>% unname() # delta Psi in MPa
+
+  dpsi    = calc_dpsi_phydro(gs, psi_soil, par_plant, par_env) # dpsi in MPa
   psi_l = psi_soil-dpsi  # leaf water potential
-  gs    = calc_gs_phydro(dpsi, psi_soil, par_plant, par_env) # gs in mol m-2 (ground) s-1
   a_j   = calc_assim_light_limited(gs = gs, jmax = jmax, par_photosynth = par_photosynth)
   a     = a_j$a
   ci    = a_j$ci
