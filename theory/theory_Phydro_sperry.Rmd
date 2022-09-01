@@ -340,6 +340,9 @@ $$
 A_j = g_\mathrm{s}  c_\mathrm{a} (1-\chi)
 $$
 
+$$
+P(\psi) = \frac{1}{2} ^{(\frac{\psi}{\psi_{50}})^b}
+$$
 
 $$
 k_\mathrm{\psi_s} = K_{max}\;(\frac{1}{2})^{(\frac{\psi_s}{\psi_{50}})^b}
@@ -347,50 +350,31 @@ $$
 
 
 $$
-k_\mathrm{\psi_l} = K_{max}\;(\frac{1}{2})^{(\frac{\psi_l}{\psi_{50}})^b} = K_{max}\;(\frac{1}{2})^{(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}
-$$
-
-$$
-k_\mathrm{\psi_{crit}} = K_{max}\;(\frac{1}{2})^{(\frac{\psi_{crit}}{\psi_{50}})^b}
+k_\mathrm{\psi_l} = K_{max}\;(\frac{1}{2})^{(\frac{\psi_l}{\psi_{50}})^b} = K_{max}\;(\frac{1}{2})^{(\frac{ \psi_s -\Delta\psi}{\psi_{50}})^b}
 $$
 
 
-Where $\psi_{crit}$ is the critical leaf water potential as the potential at which 99.9% of conductivity loss would occur.
-
-$$
-P(\psi) = \frac{1}{2} ^{(\frac{\psi}{\psi_{50}})^b}
-$$
-
-
-$$
-if\; P(\psi) = 0.001 \;  then: \; \psi_{crit} = \psi_{50}(\frac{ln(1000)}{ln(2)} )^{(\frac{1}{b})}
-$$
-
-
+We assume that $k_\mathrm{\psi_{crit}}$ is equal to 0.
 Which gives us the next expression that can be solved similarly as in the P Hydro analytical approximation, where each term is a function of the two independent variables $\chi$ and $\Delta \psi$.
 $$
-F = g_\mathrm{s}  c_\mathrm{a} (1-\chi)- A_{max} (\frac{k_\mathrm{\psi_s}- K_{max}\;(\frac{1}{2})^{(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}}{k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}}) - \alpha J_\mathrm{max}
+F = g_\mathrm{s}  c_\mathrm{a} (1-\chi) - A_{max} \frac{((\frac{1}{2})^{(\frac{\psi_s}{\psi_{50}})^b}- (\frac{1}{2})^{(\frac{ \psi_s -\Delta\psi}{\psi_{50}})^b})}{(\frac{1}{2})^{(\frac{\psi_s}{\psi_{50}})^b}} -  A_{max} \alpha J_\mathrm{max}
 $$
 
-or:
-$$
-F = g_\mathrm{s}  c_\mathrm{a} (1-\chi) (k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}})- A_{max} (k_\mathrm{\psi_s}- K_{max}\;(\frac{1}{2})^{(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}) - \alpha J_\mathrm{max} (k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}})
-$$
 
 Solved by $\chi$
 $$
-\frac{\partial F}{\partial \chi} = -g_s c_a(k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}) -\alpha \frac{\partial J_\mathrm{max}}{\partial A_{Jm}} \frac{\partial A_{Jm}}{\partial \chi}( k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}) = 0
+\frac{\partial F}{\partial \chi} = A_\mathrm{max}(\frac{ln(2)\,(\frac{1}{2})^{(\frac{ \psi_s -\Delta\psi}{\psi_{50}})^b -{(\frac{\psi_s}{\psi_{50}})^b}}\,b\,(\frac{ \psi_s -\Delta\psi}{\psi_{50}})^b}{\psi_s -\Delta\psi} - \alpha \frac{\partial J_\mathrm{max}}{\partial A_{Jm}} \frac{\partial A_{Jm}}{\partial \chi})+\frac{\partial A_\mathrm{max}}{\partial \chi}\,(-\alpha\,J_\mathrm{max} +  (\frac{1}{2})^{(\frac{ \psi_s -\Delta\psi}{\psi_{50}})^b -{(\frac{\psi_s}{\psi_{50}})^b}}-1)-g_s\,c_a= 0
 $$
 
 Solved by $\Delta\psi$
 $$
-\frac{\partial F}{\partial \Delta\psi} = \frac{\partial g_s}{\partial \Delta\psi} c_a (1-\chi) (k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}})- \frac{A_{max}\;K_{max}\;ln(2)\;(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}{2\;(\Delta\psi + |\psi_s|)(\frac{\Delta\psi + |\psi_s|}{|\psi_{50}|})^b}-
-\alpha \frac{\partial J_\mathrm{max}}{\partial A_{Jm}} \frac{\partial A_{Jm}}{\partial \Delta\psi}(k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}})= 0
+\frac{\partial F}{\partial \Delta\psi} =  \frac{\partial A_\mathrm{max}}{\partial \Delta\psi} \,(-\alpha\,J_\mathrm{max} +  (\frac{1}{2})^{(\frac{ \psi_s -\Delta\psi}{\psi_{50}})^b -{(\frac{\psi_s}{\psi_{50}})^b}}-1) - A_\mathrm{max}\,\alpha\,\frac{\partial J_\mathrm{max}}{\partial A_{Jm}} \frac{\partial A_{Jm}}{\partial \Delta\psi}+\frac{\partial g_s}{\partial \Delta\psi} c_a (1-\chi) = 0
 $$
 
 
-Here I show surfaces obtained from the optimization function numerically at four different $\psi_{s}$, a) -0.01, b) -1, c) -2 and d) -3 MPa (VPD = 1kPa). In this case the critical leaf potential is `r p_crit` MPa.
+Here I show surfaces obtained from the optimization function numerically at four different $\psi_{s}$, a) -0.01, b) -1, c) -2 and d) -3 MPa (VPD = 1kPa). 
 ```{r,message = FALSE, warning=FALSE, echo = FALSE}
+
 par_plant = list(
     conductivity = 1e-16,
     psi50 = -1.46,
@@ -398,7 +382,7 @@ par_plant = list(
   )
 
 par_cost = list(
-  alpha = 0.015     # cost of jmax
+  alpha = 0.1     # cost of jmax
 )
 jmax <- log(c(10,30,50))
 # jmax <- 4
@@ -425,8 +409,8 @@ par %>%
 df_res1 <- res %>% cbind(par)%>% mutate(jmax = as.factor(round(jmax,1)))
 
 ggplot()+
-  geom_line(data = df_res1, aes(dpsi,a, color = jmax, group = jmax), linetype =2, show.legend = FALSE)+
-  geom_line(data = df_res1,aes( dpsi,(cost+risk), color = jmax, group = jmax), linetype =4)+
+  geom_line(data = df_res1, aes(dpsi,a*risk, color = jmax, group = jmax), linetype =2, show.legend = FALSE)+
+  geom_line(data = df_res1,aes( dpsi,cost, color = jmax, group = jmax), linetype =4)+
   geom_line(data = df_res1, aes( dpsi,out, color = jmax, group = jmax), linetype =1)+
   geom_vline(aes(xintercept=df_res1[which(df_res1$out == df_res1$out %>% max(na.rm = TRUE)),"dpsi"]), linetype = 3, color= "#009E73")+
   ylab("OUT")+
@@ -434,22 +418,22 @@ ggplot()+
   #           family = "arial", fontface = "italic")+
   theme_classic()+
   scale_color_manual(values =  c("#56B4E9", "#009E73", "#F0E442"))+#colorRampPalette(c("red", "gray50"))(3)) +
-  # ylim(-0.1,4.3)+
+  ylim(-0.1,5.5)+
   xlab(expression("|"*psi[l]*"| (MPa)"))+
   theme(plot.margin = unit(c(0,0.1,-4,0.1), "cm"))+
   NULL -> f1
 
 
 ggplot()+
-  geom_line(data = df_res1, aes(gs,a, color = jmax, group = jmax), linetype =2, show.legend = FALSE)+
-  geom_line(data = df_res1,aes(gs,(cost+risk), color = jmax, group = jmax), linetype =4)+
+  geom_line(data = df_res1, aes(gs,a*risk, color = jmax, group = jmax), linetype =2, show.legend = FALSE)+
+  geom_line(data = df_res1,aes(gs,cost, color = jmax, group = jmax), linetype =4)+
   geom_line(data = df_res1, aes(gs,out, color = jmax, group = jmax), linetype =1)+
   geom_vline(aes(xintercept=df_res1[which(df_res1$out == df_res1$out %>% max(na.rm = TRUE)),"gs"]), linetype = 3, color= "#009E73")+
   ylab("OUT")+
   # geom_text(aes(x=0.05, y=1, label=as.character(expression("|"*psi[s]*"| = 0 MPa"))), parse = TRUE, size = 3)+
   theme_classic()+
   scale_color_manual(values =  c("#56B4E9", "#009E73", "#F0E442"))+#colorRampPalette(c("red", "gray50"))(3)) +
-  # ylim(-0.1,4.3)+
+  ylim(-0.1,5.5)+
   xlim(0,0.15)+
   xlab(expression(atop("g"[s]~"(mol m"^-2~"s"^-1*")")))+
   theme(plot.margin = unit(c(0,0.1,-4,0.1), "cm"))+
@@ -480,8 +464,8 @@ par %>%
 df_res2 <- res %>% cbind(par) %>% mutate(jmax = as.factor(round(jmax,1)))
 
 ggplot()+
-  geom_line(data = df_res2, aes(-psi_soil+dpsi,a, color = jmax, group = jmax), linetype =2, show.legend = FALSE)+
-  geom_line(data = df_res2,aes( -psi_soil+dpsi,(cost+risk), color = jmax, group = jmax), linetype =4)+
+  geom_line(data = df_res2, aes(-psi_soil+dpsi,a*risk, color = jmax, group = jmax), linetype =2, show.legend = FALSE)+
+  geom_line(data = df_res2,aes( -psi_soil+dpsi,cost, color = jmax, group = jmax), linetype =4)+
   geom_line(data = df_res2, aes( -psi_soil+dpsi,out, color = jmax, group = jmax), linetype =1)+
   geom_vline(aes(xintercept=df_res2[which(df_res2$out == df_res2$out %>% max(na.rm = TRUE)),"dpsi"]-psi_soil), linetype = 3, color= "#009E73")+
   ylab("OUT")+
@@ -489,22 +473,22 @@ ggplot()+
   #           family = "arial", fontface = "italic")+
   theme_classic()+
   scale_color_manual(values = c("#56B4E9", "#009E73", "#F0E442"))+#colorRampPalette(c("red", "gray50"))(3)) +
-  # ylim(-0.1,1.1)+
+  ylim(-0.1,0.5)+
   xlim(-psi_soil,-psi_soil+2)+
   xlab(expression("|"*psi[l]*"| (MPa)"))+  
   theme(plot.margin = unit(c(0,0.1,-4,0.1), "cm"))+
   NULL -> f3
 
 ggplot()+
-  geom_line(data = df_res2, aes(gs,a, color = jmax, group = jmax), linetype =2, show.legend = FALSE)+
-  geom_line(data = df_res2,aes(gs,(cost+risk), color = jmax, group = jmax), linetype =4)+
+  geom_line(data = df_res2, aes(gs,a*risk, color = jmax, group = jmax), linetype =2, show.legend = FALSE)+
+  geom_line(data = df_res2,aes(gs,cost, color = jmax, group = jmax), linetype =4)+
   geom_line(data = df_res2, aes(gs,out, color = jmax, group = jmax), linetype =1)+
   geom_vline(aes(xintercept=df_res2[which(df_res2$out == df_res2$out %>% max(na.rm = TRUE)),"gs"]), linetype = 3, color= "#009E73")+
   ylab("OUT")+
   # geom_text(aes(x=0.05, y=1, label=as.character(expression("|"*psi[s]*"| = 4 MPa"))), parse = TRUE, size = 3)+
   theme_classic()+
   scale_color_manual(values =  c("#56B4E9", "#009E73", "#F0E442"))+#colorRampPalette(c("red", "gray50"))(3)) +
-  # ylim(-0.1,1.3)+
+  ylim(-0.1,0.5)+
   xlim(0,0.15)+
   xlab(expression(atop("g"[s]~"(mol m"^-2~"s"^-1*")")))+
   theme(plot.margin = unit(c(0,0.1,-4,0.1), "cm"))+
@@ -525,6 +509,56 @@ ggarrange(plot1,plot2,ncol = 1, nrow = 2, align="hv")
 ```
 
 
+```{r,message = FALSE, warning=FALSE, echo = FALSE}
+
+par_plant = list(
+    conductivity = 1e-16,
+    psi50 = -1.46,
+    b=1.2
+  )
+jmax <- seq(-10,3.5,0.5)
+pl <- seq(0.01,1.5,0.01)
+psi_soil <- seq(0,-8,-1)
+par <- expand.grid(logjmax = jmax, dpsi = pl, psi_soil = psi_soil)
+
+# e_crit = K * -integral_P_ecrit(psi_soil, par_plant$psi50, par_plant$b) #mol m-2 (ground) s-1
+par %>% 
+  split(seq(nrow(.))) %>% 
+  purrr::map_df(function(x){
+    fn_profit_phydro_sperry_psi_soil(x,
+                 par_cost = par_cost, 
+                 par_photosynth = par_photosynth, 
+                 par_plant = par_plant, 
+                 par_env = par_env, 
+                 do_optim = FALSE, 
+                 opt_hypothesis = "LC")->res
+    return(res)
+  }) ->res
+
+df_res5 <- res %>% cbind(dpsi = par[,2]) %>% 
+  mutate(out = exp(out) %>% as.numeric(),
+         psi_soil = factor(psi_soil, 
+                              levels = rev(c("-8","-7","-6","-5","-4","-3","-2","-1","0")),
+                              labels = rev(c("-8 MPa","-7 MPa","-6 MPa","-5 MPa",
+                              "-4 MPa","-3 MPa","-2 MPa","-1 MPa","0 MPa"))))
+
+max_out <- df_res5 %>% 
+  group_by(psi_soil) %>% 
+  filter(out == max(out, na.rm = TRUE)) 
+
+
+df_res5 %>% 
+  ggplot()+
+  geom_contour_filled(aes(x=dpsi, y = jmax, z = out))+#, show.legend = FALSE)+
+  geom_point(data = max_out, aes(x=dpsi,y=jmax),shape=3)+
+  facet_wrap(~ psi_soil)+
+  theme_bw()+
+  theme(strip.background = element_rect(fill="transparent"))+
+  ylab(expression(atop(J["max"],"("*mu*"mol/m"^2*"/s)")))+
+  xlab(expression(atop(Delta*psi,"(MPa)")))+
+  viridis::scale_fill_viridis(discrete=TRUE)
+
+```
 
 
 ```{r echo=F}
@@ -613,7 +647,7 @@ if (!is.null(ref)){
 
 ```
 
-Here I show the simulations for the soil potential gradient. The plant have a $\psi_{50}$ = -3.46 a slope parameter of 1.4 and a $K$ of 3e-17
+Here I show the simulations for the soil potential gradient. The plant have a $\psi_{50}$ = -3.46 a slope parameter of 6.55 and a $K$ of 3e-17
 ```{r,echo=FALSE}
 
 # phydro_sperry_bf <- function(x){
@@ -643,8 +677,8 @@ Here I show the simulations for the soil potential gradient. The plant have a $\
 # dat_soilm_numerical = tibble(var=seq(-5,0,length.out=10)) %>% 
 #   mutate(out_hydraulics = purrr::map(var, ~phydro_sperry_bf(.)) ) %>%
 #   unnest_wider(out_hydraulics, names_sep = "_")
-dat_soilm_numerical = tibble(var=seq(-5,0,length.out=20)) %>% 
-  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_sperry_test(tc = 25, ppfd = 400, vpd = 1000, co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = .,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.015)))) %>%
+dat_soilm_numerical = tibble(var=seq(-6,0,length.out=20)) %>% 
+  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_sperry_test(tc = 25, ppfd = 400, vpd = 1000, co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = .,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.1)))) %>%
   unnest_wider(out_hydraulics, names_sep = "_")
 
 
@@ -654,16 +688,15 @@ l1= dat_soilm_numerical %>%
 cowplot::plot_grid(plotlist = l1, labels="", label_size = 16, label_colour = "grey50", label_x = 0.3, hjust = 0, align = "hv", rel_widths = 1, nrow=3, byrow=T)
 ```
 
-
 And here the simulations for VPD. Lines are simulations with $\psi_s$ equal to -1 MPa and dots -3 MPa.
 ```{r,echo=FALSE}
 
 dat_vpd_numerical = tibble(var=seq(100,3000,length.out=20)) %>% 
-  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_sperry_test(tc = 25, ppfd = 400, vpd = ., co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = -1,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.015)))) %>%
+  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_sperry_test(tc = 25, ppfd = 400, vpd = ., co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = -1,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.1)))) %>%
   unnest_wider(out_hydraulics, names_sep = "_")
 
 dat_vpd2_numerical = tibble(var=seq(100,3000,length.out=20)) %>% 
-  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_sperry_test(tc = 25, ppfd = 400, vpd = ., co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = -3,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.015)))) %>%
+  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_sperry_test(tc = 25, ppfd = 400, vpd = ., co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = -3,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.1)))) %>%
   unnest_wider(out_hydraulics, names_sep = "_")
 
 
@@ -674,5 +707,7 @@ cowplot::plot_grid(plotlist = l2, labels="", label_size = 16, label_colour = "gr
 
 
 ```
+
+
 
 
