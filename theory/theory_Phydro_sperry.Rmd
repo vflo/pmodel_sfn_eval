@@ -18,19 +18,22 @@ library(tidyr)
 library(ggplot2)
 library(gridExtra)
 library(scales)
+library(ggpubr)
 ```
 
 The ProfitMax stomatal scheme (Sperry et al. 2016) is obtimised as:
 $$
 F_{ProfitMax} = \frac{A_j}{A_{max}} -  (\frac{k_\mathrm{\psi_s}-k_\mathrm{\psi_l}}{k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}})
 $$
-The profit maximization can be rewritten as:
-$$
-F_{ProfitMax} = A_j - A_{max} (\frac{k_\mathrm{\psi_s}-k_\mathrm{\psi_l}}{k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}})
-$$
+
+
 Then we can easily account for photosynthetic cost:
 $$
-F = A_j - A_{max} (\frac{k_\mathrm{\psi_s}-k_\mathrm{\psi_l}}{k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}}) - \alpha J_\mathrm{max}
+F_{ProfitMax} = \frac{A_j}{A_{max}} - (\frac{k_\mathrm{\psi_s}-k_\mathrm{\psi_l}}{k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}}) - \alpha J_\mathrm{max}
+$$
+The profit maximization can be rewritten as:
+$$
+F = A_j - A_{max} (\frac{k_\mathrm{\psi_s}-k_\mathrm{\psi_l}}{k_\mathrm{\psi_s}-k_\mathrm{\psi_{crit}}} + \alpha J_\mathrm{max})
 $$
 
 ```{r, echo = FALSE, include = FALSE, message = FALSE}
@@ -78,32 +81,34 @@ fn_profit_phydro_sperry <- function(par, psi_soil, e_crit, par_cost, par_photosy
   
   jmax = exp(par[1])$logjmax  # Jmax in umol/m2/s (logjmax is supplied by the optimizer)
   dpsi = par[2]$dpsi       # delta Psi in MPa
-  psi_leaf = psi_soil-dpsi
+  psi_leaf = psi_soil-dpsi #MPa
   K = scale_conductivity_ks(par_plant$conductivity, par_env, par_plant, do_backtransform = FALSE)
   gs = calc_gs_test(dpsi, psi_soil, par_plant, par_env) * par_env$LAI  # gs in mol/m2ground/s
   e  = 1.6*gs*(par_env$vpd/par_env$patm)         # E in mol/m2ground/s
-
+  
+  
   ## light-limited assimilation
   a_j   <- calc_assim_light_limited(gs, jmax, par_photosynth) # Aj in umol/m2ground/s
   a     = a_j$a
   ci    = a_j$ci
   vcmax = calc_vcmax_coordinated_numerical(a,ci, par_photosynth)
-    LAI        = par_env$LAI
-    K          = scale_conductivity_ks(par_plant$conductivity, par_env, par_plant, do_backtransform = FALSE)*LAI #mol m-2 (ground) s-1 MPa-1
-    list_a = vector("list", 200)
-    for(i in 1:200){
-      e   <- i * 0.005 * e_crit
-      g   <- e/(1.6*(par_env$vpd/par_env$patm)) #mol m-2 (ground) s-1
-      c_a <- calc_assimilation_limiting(vcmax, jmax, g, par_photosynth)
-      list_a[[i]] <- c_a$a
-    }
-    ks     = K*(1/2)^(psi_soil/par_plant$psi50)^par_plant$b
-    kl     = K*(1/2)^(psi_leaf/par_plant$psi50)^par_plant$b
-    k_crit = 0
-    risk   = (ks-kl)/(ks-k_crit)
-    cost   = (par_cost$alpha * jmax)
-    amax   = max(unlist(list_a))
-    out <- a - amax*risk - cost
+  # list_a = vector("list", 200)
+  # for(i in 1:200){
+  #   e   <- i * 0.005 * e_crit
+  #   g   <- e/(1.6*(par_env$vpd/par_env$patm)) #mol m-2 (ground) s-1
+  #   c_a <- calc_assimilation_limiting(vcmax, jmax, g, par_photosynth)
+  #   list_a[[i]] <- c_a$a
+  # }
+  g   <- e_crit/(1.6*(par_env$vpd/par_env$patm)) #mol m-2 (ground) s-1
+  c_a <- calc_assimilation_limiting(vcmax, jmax, g, par_photosynth)
+  amax <-  c_a$a
+  ks     = K * par_env$LAI*(1/2)^((psi_soil/par_plant$psi50)^par_plant$b)
+  kl     = K * par_env$LAI*(1/2)^((psi_leaf/par_plant$psi50)^par_plant$b)
+  k_crit = 0
+  risk   = amax*(1-kl/ks)
+  cost   = amax*(par_cost$alpha * jmax)
+  # amax   = max(unlist(list_a))
+  out <- a - risk - cost 
   
   out <- tibble(cost = cost,
                 risk = risk,
@@ -121,11 +126,9 @@ fn_profit_phydro_sperry <- function(par, psi_soil, e_crit, par_cost, par_photosy
 
 
 fn_profit_phydro_sperry_test <- function(par, psi_soil, e_crit, par_cost, par_photosynth, par_plant, par_env, do_optim = FALSE, opt_hypothesis){
-  
   jmax = exp(par[1])  # Jmax in umol/m2/s (logjmax is supplied by the optimizer)
-  dpsi = par[2]#      # delta Psi in MPa
-  psi_leaf = psi_soil-dpsi
-  
+  dpsi = par[2]#+psi_soil       # delta Psi in MPa
+  psi_leaf = psi_soil-dpsi #MPa
   gs = calc_gs_test(dpsi, psi_soil, par_plant, par_env) * par_env$LAI  # gs in mol/m2ground/s
   e  = 1.6*gs*(par_env$vpd/par_env$patm)         # E in mol/m2ground/s
   
@@ -134,24 +137,23 @@ fn_profit_phydro_sperry_test <- function(par, psi_soil, e_crit, par_cost, par_ph
   a     = a_j$a
   ci    = a_j$ci
   vcmax = calc_vcmax_coordinated_numerical(a,ci, par_photosynth)
-  
-  # dummy_costs = 0*exp(20*(-abs(dpsi/4)-abs(jmax/1))) # ONLY added near (0,0) for numerical stability.
-    LAI        = par_env$LAI
-    K          = scale_conductivity_ks(par_plant$conductivity, par_env, par_plant, do_backtransform = FALSE)*LAI #mol m-2 (ground) s-1 MPa-1
-    list_a = vector("list", 200)
-    for(i in 1:200){
-      e   <- i * 0.005 * e_crit
-      g   <- e/(1.6*(par_env$vpd/par_env$patm)) #mol m-2 (ground) s-1
-      c_a <- calc_assimilation_limiting(vcmax, jmax, g, par_photosynth)
-      list_a[[i]] <- c_a$a
-    }
-    ks     = K*(1/2)^(psi_soil/par_plant$psi50)^par_plant$b
-    kl     = K*(1/2)^(psi_leaf/par_plant$psi50)^par_plant$b
-    k_crit = 0
-    risk   = (ks-kl)/(ks-k_crit)
-    cost   = (par_cost$alpha * jmax)
-    amax   = max(unlist(list_a))
-    out <- a - amax*risk - cost
+  # list_a = vector("list", 200)
+  # for(i in 1:200){
+  #   e   <- i * 0.005 * e_crit
+  #   g   <- e/(1.6*(par_env$vpd/par_env$patm)) #mol m-2 (ground) s-1
+  #   c_a <- calc_assimilation_limiting(vcmax, jmax, g, par_photosynth)
+  #   list_a[[i]] <- c_a$a
+  # }
+  g   <- e_crit/(1.6*(par_env$vpd/par_env$patm)) #mol m-2 (ground) s-1
+  c_a <- calc_assimilation_limiting(vcmax, jmax, g, par_photosynth)
+  amax <-  c_a$a
+  ks     = K * par_env$LAI*(1/2)^((psi_soil/par_plant$psi50)^par_plant$b)
+  kl     = K * par_env$LAI*(1/2)^((psi_leaf/par_plant$psi50)^par_plant$b)
+  k_crit = 0
+  risk   = amax*(1-kl/ks)
+  cost   = amax*(par_cost$alpha * jmax)
+  # amax   = max(unlist(list_a))
+  out <- a - risk - cost 
   if (do_optim){
     return(-out)
   } else {
@@ -164,9 +166,9 @@ optimise_stomata_phydro_test <- function(fn_profit, psi_soil, par_cost, e_crit, 
   if(is.null(jmax_lim)){jmax_lim = 7}
   
   out_optim <- optimr::optimr(
-    par            = c(logjmax=-4, dpsi=(psi_soil-p_crit)/2),  
+    par            = c(logjmax=0, dpsi=1),  
     lower          = c(-10, 0.001),
-    upper          = c(jmax_lim,(psi_soil-p_crit)),
+    upper          = c(jmax_lim,10),
     fn             = fn_profit,
     psi_soil       = psi_soil,
     e_crit         = e_crit,
@@ -261,7 +263,7 @@ calc_phydro_sperry_test <- function(tc, ppfd, vpd, co2, elv, LAI, fapar, kphio, 
 
 
 par_cost = list(
-  alpha = 0.1     # cost of jmax
+  alpha = 0.005     # cost of jmax
 )
 
 p = rpmodel::calc_patm(0)
@@ -273,22 +275,13 @@ par_env = list(
   tc = 25,
   vpd = 1000,
   LAI = 1.5
-)
+  )
 
 par_plant = list(
-  # Ks0=1e-12,              # m2
-  # v_huber=1e-4,           #
-  height=10,              # m
-  # conductivity_scalar=3,  # Scales (Ks0*v_huber/H)
-  conductivity = 3e-17,
-  psi50 = -3.46,             # Mpa
-  d = -3.66,
-  c = 6.55,
-  b=6.55,                    # 
-  rs = 0.1*1e-6,
-  rr =2,
-  dens_sapwood = 700
-)
+  conductivity = 1e-16,
+  psi50 = -1.46,                   # 
+  b=1.4
+  )
 
 par_photosynth = get_std_photosythnesis_params()
 
@@ -326,17 +319,14 @@ df_res <- res %>% cbind(par)
 
 df_res %>% 
   ggplot()+
-  geom_point(aes(dpsi,out_a), color = "#112CB9")+
-  geom_point(aes(dpsi,risk), color = "#112CB9")+
-  geom_point(aes(dpsi,out), color = "#FFB806")+
-  geom_point(aes(dpsi,out_nocost), color = "red3")+
+  geom_point(aes(dpsi,a), color = "grey50")+
+  geom_point(aes(dpsi,(risk+cost)), color = "grey50")+
+  geom_point(aes(dpsi,out), color = "grey10")+
   geom_vline(aes(xintercept=df_res[which(df_res$out == df_res$out %>% max(na.rm = TRUE)),"dpsi"]), linetype = 2)+
-  # geom_vline(aes(xintercept=df_res[which(df_res$out_nocost == df_res$out_nocost %>% max(na.rm = TRUE)),"dpsi"]), linetype = 2, color = "red")+
   ylab("OUT")+
-  geom_text(x=3, y=-4, label="Example of Profit functions with VPD = 1 kPa, \n psi soil = -0.01 MPa and Jmax fixed",
-            family = "arial", fontface = "italic")+
+  geom_text(aes(x=3.5, y=1.5, label=as.character(expression(atop("Example of Profit functions with VPD = 1 kPa", paste("psi soil = 0 MPa and Jmax ="*20*mu*"mol m"^{-2}*"s"^{-1}))))), parse = TRUE)+
   theme_classic()+
-  # ylim(-0.5,0.5)+
+  # ylim(0,1.2)+
   NULL
 
 
@@ -401,20 +391,27 @@ $$
 
 Here I show surfaces obtained from the optimization function numerically at four different $\psi_{s}$, a) -0.01, b) -1, c) -2 and d) -3 MPa (VPD = 1kPa). In this case the critical leaf potential is `r p_crit` MPa.
 ```{r,message = FALSE, warning=FALSE, echo = FALSE}
+par_plant = list(
+    conductivity = 1e-16,
+    psi50 = -1.46,
+    b=1.4
+  )
 
-
-jmax <- seq(1,5,0.2)
+par_cost = list(
+  alpha = 0.015     # cost of jmax
+)
+jmax <- log(c(10,30,50))
 # jmax <- 4
-pl <- seq(0.02,3.4,0.02)
+pl <- seq(0.02,2,0.005)
 par <- expand.grid(logjmax = jmax, dpsi = pl)
 
-psi_soil = -0.01
+psi_soil = 0
 e_crit = K * -integral_P_ecrit(psi_soil, par_plant$psi50, par_plant$b) #mol m-2 (ground) s-1
 par %>% 
   split(seq(nrow(.))) %>% 
   purrr::map_df(function(x){
     fn_profit_phydro_sperry(x,
-                 psi_soil = psi_soil, 
+                 psi_soil = psi_soil,
                  e_crit = e_crit,
                  par_cost = par_cost, 
                  par_photosynth = par_photosynth, 
@@ -425,83 +422,43 @@ par %>%
     return(res)
   }) ->res
 
-df_res1 <- res %>% cbind(par)
+df_res1 <- res %>% cbind(par)%>% mutate(jmax = as.factor(round(jmax,1)))
 
-df_res1 %>%# filter(log(jmax) == 4)%>% 
-  ggplot()+
-  # geom_point(aes(dpsi,out_ecrit), color = "#112CB9")+
-  # geom_point(aes(dpsi,out_e), color = "#112CB9")+
-  # geom_point(aes(dpsi,out), color = "#FFB806")+
-  geom_point(aes(dpsi,out, color = jmax))+
-  geom_vline(aes(xintercept=df_res1[which(df_res1$out == df_res1$out %>% max(na.rm = TRUE)),"dpsi"]), linetype = 2)+
+ggplot()+
+  geom_line(data = df_res1, aes(dpsi,a, color = jmax, group = jmax), linetype =2, show.legend = FALSE)+
+  geom_line(data = df_res1,aes( dpsi,(cost+risk), color = jmax, group = jmax), linetype =4)+
+  geom_line(data = df_res1, aes( dpsi,out, color = jmax, group = jmax), linetype =1)+
+  geom_vline(aes(xintercept=df_res1[which(df_res1$out == df_res1$out %>% max(na.rm = TRUE)),"dpsi"]), linetype = 3, color= "#009E73")+
   ylab("OUT")+
   # geom_text(x=2, y=-10, label="Example of the Profit surface \n with VPD = 1 kPa, psi soil = -0.01 MPa",
   #           family = "arial", fontface = "italic")+
   theme_classic()+
-  # ylim(-2,1.2)+
+  scale_color_manual(values =  c("#56B4E9", "#009E73", "#F0E442"))+#colorRampPalette(c("red", "gray50"))(3)) +
+  # ylim(-0.1,4.3)+
+  xlab(expression("|"*psi[l]*"| (MPa)"))+
+  theme(plot.margin = unit(c(0,0.1,-4,0.1), "cm"))+
   NULL -> f1
 
-psi_soil = -1
-e_crit = K * -integral_P_ecrit(psi_soil, par_plant$psi50, par_plant$b) #mol m-2 (ground) s-1
-par %>% 
-  split(seq(nrow(.))) %>% 
-  purrr::map_df(function(x){
-    fn_profit_phydro_sperry(x,
-                 psi_soil = psi_soil, 
-                 e_crit = e_crit,
-                 par_cost = par_cost, 
-                 par_photosynth = par_photosynth, 
-                 par_plant = par_plant, 
-                 par_env = par_env, 
-                 do_optim = FALSE, 
-                 opt_hypothesis = "LC")->res
-    return(res)
-  }) ->res
 
-df_res2 <- res %>% cbind(par)
-
-df_res2 %>% 
-  ggplot()+
-  geom_point(aes(dpsi,out, color = jmax))+
-  geom_vline(aes(xintercept=df_res2[which(df_res2$out == df_res2$out %>% max(na.rm = TRUE)),"dpsi"]), linetype = 2)+
+ggplot()+
+  geom_line(data = df_res1, aes(gs,a, color = jmax, group = jmax), linetype =2, show.legend = FALSE)+
+  geom_line(data = df_res1,aes(gs,(cost+risk), color = jmax, group = jmax), linetype =4)+
+  geom_line(data = df_res1, aes(gs,out, color = jmax, group = jmax), linetype =1)+
+  geom_vline(aes(xintercept=df_res1[which(df_res1$out == df_res1$out %>% max(na.rm = TRUE)),"gs"]), linetype = 3, color= "#009E73")+
   ylab("OUT")+
-  # geom_text(x=2, y=-10, label="Example of the Profit surface \n with VPD = 1 kPa, psi soil = -1.5 MPa",
-  #           family = "arial", fontface = "italic")+
+  # geom_text(aes(x=0.05, y=1, label=as.character(expression("|"*psi[s]*"| = 0 MPa"))), parse = TRUE, size = 3)+
   theme_classic()+
-    ylim(-2,1.3)+
+  scale_color_manual(values =  c("#56B4E9", "#009E73", "#F0E442"))+#colorRampPalette(c("red", "gray50"))(3)) +
+  # ylim(-0.1,4.3)+
+  xlim(0,0.15)+
+  xlab(expression(atop("g"[s]~"(mol m"^-2~"s"^-1*")")))+
+  theme(plot.margin = unit(c(0,0.1,-4,0.1), "cm"))+
   NULL -> f2
 
-
-psi_soil = -2
-e_crit = K * -integral_P_ecrit(psi_soil, par_plant$psi50, par_plant$b) #mol m-2 (ground) s-1
-par %>% 
-  split(seq(nrow(.))) %>% 
-  purrr::map_df(function(x){
-    fn_profit_phydro_sperry(x,
-                 psi_soil = psi_soil, 
-                 e_crit = e_crit,
-                 par_cost = par_cost, 
-                 par_photosynth = par_photosynth, 
-                 par_plant = par_plant, 
-                 par_env = par_env, 
-                 do_optim = FALSE, 
-                 opt_hypothesis = "LC")->res
-    return(res)
-  }) ->res
-
-df_res3 <- res %>% cbind(par)
-
-df_res3 %>% 
-  ggplot()+
-  geom_point(aes(dpsi,out, color = jmax))+
-  geom_vline(aes(xintercept=df_res3[which(df_res3$out == df_res3$out %>% max(na.rm = TRUE)),"dpsi"]), linetype = 2)+
-  ylab("OUT")+
-  # geom_text(x=2, y=-10, label="Example of the Profit surface \n with VPD = 1 kPa, psi soil = -3 MPa",
-  #           family = "arial", fontface = "italic")+
-  theme_classic()+
-  ylim(-2,1.2)+
-  NULL -> f3
-
+jmax <- log(c(5,20,35))
+# jmax <- 4
+pl <- seq(0.02,2,0.005)
+par <- expand.grid(logjmax = jmax, dpsi = pl)
 
 psi_soil = -3
 e_crit = K * -integral_P_ecrit(psi_soil, par_plant$psi50, par_plant$b) #mol m-2 (ground) s-1
@@ -509,7 +466,7 @@ par %>%
   split(seq(nrow(.))) %>% 
   purrr::map_df(function(x){
     fn_profit_phydro_sperry(x,
-                 psi_soil = psi_soil, 
+                 psi_soil = psi_soil,
                  e_crit = e_crit,
                  par_cost = par_cost, 
                  par_photosynth = par_photosynth, 
@@ -520,74 +477,53 @@ par %>%
     return(res)
   }) ->res
 
-df_res4 <- res %>% cbind(par)
+df_res2 <- res %>% cbind(par) %>% mutate(jmax = as.factor(round(jmax,1)))
 
-df_res4 %>% 
-  ggplot()+
-  geom_point(aes(dpsi,out, color = jmax))+
-  geom_vline(aes(xintercept=df_res4[which(df_res4$out == df_res4$out %>% max(na.rm = TRUE)),"dpsi"]), linetype = 2)+
+ggplot()+
+  geom_line(data = df_res2, aes(-psi_soil+dpsi,a, color = jmax, group = jmax), linetype =2, show.legend = FALSE)+
+  geom_line(data = df_res2,aes( -psi_soil+dpsi,(cost+risk), color = jmax, group = jmax), linetype =4)+
+  geom_line(data = df_res2, aes( -psi_soil+dpsi,out, color = jmax, group = jmax), linetype =1)+
+  geom_vline(aes(xintercept=df_res2[which(df_res2$out == df_res2$out %>% max(na.rm = TRUE)),"dpsi"]-psi_soil), linetype = 3, color= "#009E73")+
   ylab("OUT")+
-  # geom_text(x=2, y=-10, label="Example of the Profit surface \n with VPD = 1 kPa, psi soil = -1.5 MPa",
+  # geom_text(x=2, y=-10, label="Example of the Profit surface \n with VPD = 1 kPa, psi soil = -0.01 MPa",
   #           family = "arial", fontface = "italic")+
   theme_classic()+
-    ylim(-2,1.2)+
+  scale_color_manual(values = c("#56B4E9", "#009E73", "#F0E442"))+#colorRampPalette(c("red", "gray50"))(3)) +
+  # ylim(-0.1,1.1)+
+  xlim(-psi_soil,-psi_soil+2)+
+  xlab(expression("|"*psi[l]*"| (MPa)"))+  
+  theme(plot.margin = unit(c(0,0.1,-4,0.1), "cm"))+
+  NULL -> f3
+
+ggplot()+
+  geom_line(data = df_res2, aes(gs,a, color = jmax, group = jmax), linetype =2, show.legend = FALSE)+
+  geom_line(data = df_res2,aes(gs,(cost+risk), color = jmax, group = jmax), linetype =4)+
+  geom_line(data = df_res2, aes(gs,out, color = jmax, group = jmax), linetype =1)+
+  geom_vline(aes(xintercept=df_res2[which(df_res2$out == df_res2$out %>% max(na.rm = TRUE)),"gs"]), linetype = 3, color= "#009E73")+
+  ylab("OUT")+
+  # geom_text(aes(x=0.05, y=1, label=as.character(expression("|"*psi[s]*"| = 4 MPa"))), parse = TRUE, size = 3)+
+  theme_classic()+
+  scale_color_manual(values =  c("#56B4E9", "#009E73", "#F0E442"))+#colorRampPalette(c("red", "gray50"))(3)) +
+  # ylim(-0.1,1.3)+
+  xlim(0,0.15)+
+  xlab(expression(atop("g"[s]~"(mol m"^-2~"s"^-1*")")))+
+  theme(plot.margin = unit(c(0,0.1,-4,0.1), "cm"))+
   NULL -> f4
 
-cowplot::plot_grid(f1,f2,f3,f4, labels = "auto")
+# 
+# cowplot::plot_grid(f1,f2,f3,f4, labels = "auto",
+#           ncol = 2, nrow = 2)
+plot1 <- ggarrange(f1,f2, labels = c("A","B"), common.legend = TRUE, legend = "top",
+                                    ncol = 2, nrow = 1, align="h",font.label = list(size = 10 ))
+# plot1 <- annotate_figure(plot1,top =text_grob(expression("|"*psi[s]*"| = 0 MPa", size = 5)))
+plot2 <- ggarrange(f3,f4, labels = c("C","D"),common.legend = TRUE, legend = "top",
+                                    ncol = 2, nrow = 1, align="h" ,font.label = list(size = 10))
+# plot2 <- annotate_figure(plot2,top =text_grob(expression("|"*psi[s]*"| = 3 MPa"),size = 10))
+ggarrange(plot1,plot2,ncol = 1, nrow = 2, align="hv")
 
 
 ```
 
-Now the same soil water potentials but expressed as Canopy conductance (gs)
-```{r,message = FALSE, warning=FALSE, echo = FALSE}
-
-df_res1 %>%
-  ggplot()+
-  geom_point(aes(gs,out, color = jmax))+
-  geom_vline(aes(xintercept=df_res1[which(df_res1$out == df_res1$out %>% max(na.rm = TRUE)),"gs"]), linetype = 2)+
-  ylab("OUT")+
-  geom_text(x=3, y=-10, label="Example of the Profit surface \n with VPD = 1 kPa, psi soil = -0.01 MPa",
-            family = "arial", fontface = "italic")+
-  theme_classic()+
-  xlim(0,0.3)+
-  NULL -> f5
-
-df_res2 %>%
-  ggplot()+
-  geom_point(aes(gs,out, color = jmax))+
-  geom_vline(aes(xintercept=df_res2[which(df_res2$out == df_res2$out %>% max(na.rm = TRUE)),"gs"]), linetype = 2)+
-  ylab("OUT")+
-  geom_text(x=3, y=-10, label="Example of the Profit surface \n with VPD = 1 kPa, psi soil = -1.5 MPa",
-            family = "arial", fontface = "italic")+
-  theme_classic()+
-  xlim(0,0.3)+
-  NULL -> f6
-
-df_res3 %>%
-  ggplot()+
-  geom_point(aes(gs,out, color = jmax))+
-  geom_vline(aes(xintercept=df_res3[which(df_res3$out == df_res3$out %>% max(na.rm = TRUE)),"gs"]), linetype = 2)+
-  ylab("OUT")+
-  geom_text(x=3, y=-10, label="Example of the Profit surface \n with VPD = 1 kPa, psi soil = -3 MPa",
-            family = "arial", fontface = "italic")+
-  theme_classic()+
-  xlim(0,0.3)+
-  NULL-> f7
-
-df_res4 %>%
-  ggplot()+
-  geom_point(aes(gs,out, color = jmax))+
-  geom_vline(aes(xintercept=df_res4[which(df_res4$out == df_res4$out %>% max(na.rm = TRUE)),"gs"]), linetype = 2)+
-  ylab("OUT")+
-  geom_text(x=3, y=-10, label="Example of the Profit surface \n with VPD = 1 kPa, psi soil = -3 MPa",
-            family = "arial", fontface = "italic")+
-  theme_classic()+
-  xlim(0,0.3)+
-  NULL-> f8
-
-cowplot::plot_grid(f5,f6,f7,f8, labels = "auto")
-
-```
 
 
 
@@ -677,7 +613,7 @@ if (!is.null(ref)){
 
 ```
 
-Here I show the simulations for the soil potential gradient. The plant have a $\psi_{50}$ = -3.46 a slope parameter of 6.55 and a $K$ of 3e-17
+Here I show the simulations for the soil potential gradient. The plant have a $\psi_{50}$ = -3.46 a slope parameter of 1.4 and a $K$ of 3e-17
 ```{r,echo=FALSE}
 
 # phydro_sperry_bf <- function(x){
@@ -708,7 +644,7 @@ Here I show the simulations for the soil potential gradient. The plant have a $\
 #   mutate(out_hydraulics = purrr::map(var, ~phydro_sperry_bf(.)) ) %>%
 #   unnest_wider(out_hydraulics, names_sep = "_")
 dat_soilm_numerical = tibble(var=seq(-5,0,length.out=20)) %>% 
-  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_sperry_test(tc = 25, ppfd = 400, vpd = 1000, co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = .,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.1)))) %>%
+  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_sperry_test(tc = 25, ppfd = 400, vpd = 1000, co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = .,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.015)))) %>%
   unnest_wider(out_hydraulics, names_sep = "_")
 
 
@@ -723,11 +659,11 @@ And here the simulations for VPD. Lines are simulations with $\psi_s$ equal to -
 ```{r,echo=FALSE}
 
 dat_vpd_numerical = tibble(var=seq(100,3000,length.out=20)) %>% 
-  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_sperry_test(tc = 25, ppfd = 400, vpd = ., co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = -1,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.1)))) %>%
+  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_sperry_test(tc = 25, ppfd = 400, vpd = ., co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = -1,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.015)))) %>%
   unnest_wider(out_hydraulics, names_sep = "_")
 
 dat_vpd2_numerical = tibble(var=seq(100,3000,length.out=20)) %>% 
-  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_sperry_test(tc = 25, ppfd = 400, vpd = ., co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = -3,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.1)))) %>%
+  mutate(out_hydraulics = purrr::map(var, ~calc_phydro_sperry_test(tc = 25, ppfd = 400, vpd = ., co2 = 400, elv = 0,LAI = 1.5, fapar = 0.7, kphio = 0.087, psi_soil = -3,  par_plant = par_plant, rdark = 0.02, par_cost = list(alpha=0.015)))) %>%
   unnest_wider(out_hydraulics, names_sep = "_")
 
 
