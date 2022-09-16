@@ -46,7 +46,9 @@ par_data <- list.files(path_par) %>%
 #                          "Quercus ilex","Quercus suber"
 #   ))
 df_param <- par_data %>% 
-  filter(dpsi == TRUE) %>%
+  filter(dpsi == FALSE) %>% 
+  # filter(dpsi == TRUE & !scheme %in% c("phydro_wue","phydro_cgain",'phydro_wang_mod','phydro_sox')|
+  #          dpsi == FALSE & scheme %in% c("phydro_wue","phydro_cgain",'phydro_wang_mod','phydro_sox')) %>%
   # rbind(par_data_extra) %>%
   mutate(scheme = factor(scheme, 
                          levels = c("phydro_wue","phydro_cmax",
@@ -55,9 +57,9 @@ df_param <- par_data %>%
                                     "phydro_wang_mod","phydro_sox_mod",
                                     "phydro_sperry"),
                          labels = c("WUE",'CMAX','CGAIN','PHYDRO','PROFITMAX2net','SOXnet','PROFITMAX2','SOX','PROFITMAX')) 
-  )# %>% 
-  # filter(!scheme %in% c('PROFITMAX2_alt',
-  #                       'SOX_alt'))
+  )%>% 
+  filter(!scheme %in% c('PROFITMAX2_alt',
+                        'SOX_alt'))
 # 
 # df_param %>% 
 #   ggplot(aes(scheme, log(K.scale), color = acclimation))+
@@ -102,7 +104,7 @@ df_param %>%
 #   mytheme()
 # 
 # df_param %>% 
-#   filter(acclimation == TRUE) %>% 
+#   filter(acclimation == "Acclimated") %>% 
 #   ggplot(aes(scheme, alpha))+
 #   geom_boxplot()+
 #   mytheme()
@@ -117,7 +119,9 @@ df_param %>%
 #### SIMULATIONS RESULTS ####
 
 df <- df %>% 
-  filter(dpsi == TRUE) %>% 
+  filter(dpsi == TRUE & scheme %in% c("phydro")|
+           dpsi == FALSE & !scheme %in% c("phydro")) %>%
+  # filter(dpsi == FALSE) %>%
   mutate(chi = Ciest/ca,
          scheme = factor(scheme, 
                          levels = c("phydro_wue","phydro_cmax",
@@ -130,25 +134,174 @@ df <- df %>%
          acclimation = factor(acclimation, 
                               levels = c('TRUE','FALSE'),
                               labels = c("Acclimated", "No acclimated"))
-  ) #%>% 
-  # filter(!scheme %in% c('PROFITMAX2_alt',
-  #                       'SOX_alt'))
+  ) %>% 
+  filter(!scheme %in% c('PROFITMAX2net',
+                        'SOXnet'))
 
 
 
-#### R2 A
+#### A
 df_a <- df %>% 
   group_by(scheme,acclimation,Species) %>% 
   filter(!is.na(A)) %>% 
   mutate(diff_a = A - a_pred) %>% 
   summarise(r = cor(A, a_pred, use = "pairwise.complete.obs"),
-            bias_scale = mean(diff_a,na.rm = TRUE)/mean(A,na.rm = TRUE),
+            bias = mean(diff_a,na.rm = TRUE)/mean(A,na.rm = TRUE),
             rmse = Metrics::rmse(A,a_pred),
-            bias = Metrics::bias(A,a_pred))
+            beta = lm(A~a_pred)$coefficients[2]) %>% 
+  filter(beta>0)
+
+
 
 r_a <- lmerTest::lmer(r~scheme*acclimation + (1|Species), data = df_a)
-emmeans(r_a,'scheme', by='acclimation')
+r_a_p <- emmeans::contrast(emmeans(r_a, "acclimation",by='scheme'))%>% 
+  broom::tidy() %>% 
+  dplyr::select(scheme,adj.p.value) %>% 
+  summarise_all(unique)
+r_a <- emmeans(r_a,~scheme*acclimation) %>% 
+  broom::tidy(conf.int = TRUE)%>% 
+  left_join(beta_a_p) %>% 
+  mutate(sig = case_when(adj.p.value >= 0.05~"NO",
+                         TRUE~"YES")) 
 p1 <- df_a %>%
+  ggplot(aes(scheme,r,fill = acclimation, color = acclimation, group = acclimation))+
+  geom_point(shape= 21,position=position_dodge(width = 0.3))+
+  geom_abline(intercept = 0, slope = 0, color = "grey20")+
+  geom_pointrange(data = r_a, 
+                  aes(scheme,estimate,color = acclimation,
+                      ymin = conf.low,ymax = conf.high,
+                      shape = sig),size = 0.8,
+                  position=position_dodge(width = 0.3),
+                  show.legend = FALSE)+
+  # stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), 
+  #              geom="pointrange", position=position_dodge(width = 0.3))+
+  mytheme2()+
+  theme(legend.title = element_blank())+
+  xlab("")+
+  ylab(expression(" Assimilation rate r Pearson's correlation"))+
+  scale_color_manual(values = c("#A6611A","#018571"))+
+  scale_fill_manual(values =c("#DFC27D","#80CDC1"))+
+  scale_shape_manual(values = c(1, 19))+
+  coord_flip()
+
+
+
+beta_a <- lmerTest::lmer(beta~scheme*acclimation + (1|Species), data = df_a)
+beta_a_p <- emmeans::contrast(emmeans(beta_a, "acclimation",by='scheme'))%>% 
+  broom::tidy() %>% 
+  dplyr::select(scheme,adj.p.value) %>% 
+  summarise_all(unique)
+beta_a <- emmeans(beta_a,~scheme*acclimation) %>% 
+  broom::tidy(conf.int = TRUE) %>% 
+  left_join(beta_a_p) %>% 
+  mutate(sig = case_when(adj.p.value >= 0.05~"NO",
+                         TRUE~"YES")) 
+
+p2 <- df_a%>% 
+  ggplot(aes(scheme,beta, fill = acclimation, color = acclimation, group = acclimation))+
+  geom_point(shape= 21,position=position_dodge(width = 0.3))+
+  geom_abline(intercept = 1, slope = 0, color = "grey20")+
+  geom_pointrange(data = beta_a, 
+                  aes(scheme,estimate,color = acclimation,
+                      ymin = conf.low,ymax = conf.high,
+                      shape = sig),size = 0.8,
+                  position=position_dodge(width = 0.3),
+                  show.legend = FALSE)+
+  # stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), 
+  #              geom="pointrange",position=position_dodge(width = 0.3))+
+  mytheme2()+
+  theme(legend.title = element_blank())+
+  xlab("")+
+  ylim(0,5)+
+  ylab(expression(' Assimilation rate'~beta))+
+  scale_color_manual(values = c("#A6611A","#018571"))+
+  scale_fill_manual(values =c("#DFC27D","#80CDC1"))+
+  scale_shape_manual(values = c(1, 19))+
+  coord_flip()
+
+
+
+rmse_a <- lmerTest::lmer(rmse~scheme*acclimation + (1|Species), data = df_a)
+rmse_a_p <- emmeans::contrast(emmeans(rmse_a, "acclimation",by='scheme'))%>% 
+  broom::tidy() %>% 
+  dplyr::select(scheme,adj.p.value) %>% 
+  summarise_all(unique)
+rmse_a <- emmeans(rmse_a,~scheme*acclimation) %>% 
+  broom::tidy(conf.int = TRUE) %>% 
+  left_join(rmse_a_p) %>% 
+  mutate(sig = case_when(adj.p.value >= 0.05~"NO",
+                         TRUE~"YES")) 
+p3 <- df_a %>%
+  ggplot(aes(scheme,rmse, fill = acclimation, color = acclimation, group = acclimation))+
+  geom_point(shape= 21,position=position_dodge(width = 0.3))+
+  geom_pointrange(data = rmse_a, 
+                  aes(scheme,estimate,color = acclimation,
+                      ymin = conf.low,ymax = conf.high,
+                      shape = sig),size = 0.8,
+                  position=position_dodge(width = 0.3),
+                  show.legend = FALSE)+
+  # stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), 
+  #              geom="pointrange",position=position_dodge(width = 0.3))+
+  mytheme2()+
+  theme(legend.title = element_blank())+
+  xlab("")+
+  ylab(expression("Assimilation rate RMSE  ("*mu*"mol m"^-2~"s"^-1*")"))+
+  scale_color_manual(values = c("#A6611A","#018571"))+
+  scale_fill_manual(values =c("#DFC27D","#80CDC1"))+
+  scale_shape_manual(values = c(19))+ #since all the pairs have significant difference, select only sig shape
+  coord_flip()
+
+bias_a <- lmerTest::lmer(bias~scheme*acclimation + (1|Species), data = df_a)
+bias_a_p <- emmeans::contrast(emmeans(bias_a, "acclimation",by='scheme'))%>% 
+  broom::tidy() %>% 
+  dplyr::select(scheme,adj.p.value) %>% 
+  summarise_all(unique)
+bias_a <- emmeans(bias_a,~scheme*acclimation) %>% 
+  broom::tidy(conf.int = TRUE) %>% 
+  left_join(rmse_a_p) %>% 
+  mutate(sig = case_when(adj.p.value >= 0.05~"NO",
+                         TRUE~"YES")) 
+p4 <- df_a %>%
+  ggplot(aes(scheme,bias,fill = acclimation, color = acclimation, group = acclimation))+
+  geom_point(shape= 21,position=position_dodge(width = 0.3))+
+  geom_abline(intercept = 0, slope = 0, color = "grey20")+
+  geom_pointrange(data = bias_a, 
+                  aes(scheme,estimate,color = acclimation,
+                      ymin = conf.low,ymax = conf.high,
+                      shape = sig), size = 0.8,
+                  position=position_dodge(width = 0.3),
+                  show.legend = FALSE)+
+  # stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), 
+  #              geom="pointrange",position=position_dodge(width = 0.3))+
+  mytheme2()+
+  theme(legend.title = element_blank())+
+  xlab("")+
+  ylab(expression("Assimilation rate BIAS"))+
+  scale_color_manual(values = c("#A6611A","#018571"))+
+  scale_fill_manual(values =c("#DFC27D","#80CDC1"))+
+  scale_shape_manual(values = c(19))+ #since all the pairs have significant difference, select only sig shape
+  coord_flip()
+
+
+ggarrange(p1,p2,p3,p4, 
+          align='hv', labels=c('a', 'b','c','d'),
+          common.legend = T,ncol=2, nrow = 2)
+
+
+
+#### R2 G
+df_g <- df %>% 
+  group_by(scheme,acclimation,Species) %>% 
+  filter(!is.na(gC)) %>% 
+  mutate(diff_g = gC - g_pred) %>% 
+  summarise(r = cor(gC,g_pred, use = "pairwise.complete.obs"),
+            bias_scale = mean(diff_g,na.rm = TRUE)/mean(gC,na.rm = TRUE),
+            rmse = Metrics::rmse(gC,g_pred),
+            beta = lm(gC~g_pred)$coefficients[2])
+
+r_g <- lmerTest::lmer(r~scheme*acclimation + (1|Species), data = df_a)
+emmeans(r_a,'scheme', by='acclimation')
+p1 <- df_g %>%
   ggplot(aes(scheme,r,color = acclimation, group = acclimation))+
   geom_point(shape= 1,position=position_dodge(width = 0.3))+
   geom_abline(intercept = 0, slope = 0, color = "grey20")+
@@ -161,15 +314,15 @@ p1 <- df_a %>%
   scale_fill_manual(values =c("#DFC27D","#80CDC1"))+
   coord_flip()
 
-p2 <- df_a %>%
-  ggplot(aes(scheme,bias,color = acclimation, group = acclimation))+
+p2 <- df_g %>% #filter(beta<100) %>% 
+  ggplot(aes(scheme,beta,color = acclimation, group = acclimation))+
   geom_point(shape= 1,position=position_dodge(width = 0.3))+
-  geom_abline(intercept = 0, slope = 0, color = "grey20")+
+  geom_abline(intercept = 1, slope = 0, color = "grey20")+
   stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), 
                geom="pointrange",position=position_dodge(width = 0.3))+
   mytheme2()+
   theme(legend.title = element_blank())+
-  ylab(expression("A BIAS"))+
+  ylab(expression(g[CO2]~beta))+
   scale_color_manual(values = c("#A6611A","#018571"))+
   scale_fill_manual(values =c("#DFC27D","#80CDC1"))+
   coord_flip()
@@ -206,50 +359,6 @@ ggarrange(p1,p2,p3,p4,
           align='hv', labels=c('a', 'b','c','d'),
           common.legend = T,ncol=2, nrow = 2)
 
-
-
-
-summary(r_sqrt_a)
-car::Anova(r_sqrt_a)
-
-bias_a <- lmerTest::lmer(bias~acclimation + (1|Species) + (1|scheme), data = df_a)
-
-summary(bias_a)
-car::Anova(bias_a)
-emmeans::contrast(emmeans::emmeans(bias_a,specs = "acclimation",by='scheme'))
-emmeans::contrast(emmeans::emmeans(bias_a,specs = "scheme",by='acclimation'))
-difflsmeans(bias_a, test.effs = "acclimation", ddf="Kenward-Roger")
-pwpm(emmeans(bias_a,  ~ scheme),means = FALSE, flip = TRUE,reverse = TRUE)
-
-
-
-#### R2 G
-df_g <- df %>% 
-  group_by(scheme,acclimation,Species) %>% 
-  filter(!is.na(gC)) %>% 
-  summarise(r_sqrt = cor(gC, g_pred, use = "pairwise.complete.obs")^2 ,
-            bias = Metrics::mape(gC, g_pred))
-
-p3 <- df_g %>%
-  ggplot(aes(scheme,r_sqrt,color = acclimation, group = acclimation))+
-  geom_point(shape= 1,position=position_dodge(width = 0.3))+
-  stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), 
-               geom="pointrange",position=position_dodge(width = 0.3))+
-  mytheme2()+
-  # xlab("Optimization scheme")+
-  ylab(expression("G"[CO2]~"R"^2))+
-  scale_color_manual(values = c("#A6611A","#018571"))+
-  scale_fill_manual(values =c("#DFC27D","#80CDC1"))
-p4 <- df_g %>%
-  ggplot(aes(scheme,bias,color = acclimation, group = acclimation))+
-  geom_point(shape= 1,position=position_dodge(width = 0.3))+
-  stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), 
-               geom="pointrange", position=position_dodge(width = 0.3))+
-  mytheme2()+
-  # xlab("Optimization scheme")+
-  ylab(expression("G"[CO2]~"BIAS"))+
-  scale_color_manual(values = c("#A6611A","#018571"))+
-  scale_fill_manual(values =c("#DFC27D","#80CDC1"))
 
 
 #### R2 CHI
@@ -321,14 +430,14 @@ ggarrange(p1,p2,p3,p4,p5,p6,p7,p8,
 #########################
 
 df_A_annot_t <- df %>% 
-  filter(acclimation == TRUE) %>%
+  filter(acclimation == "Acclimated") %>%
   group_by(scheme, acclimation) %>% 
   summarise(r_sqrt = cor(A, a_pred, use = "pairwise.complete.obs")^2,
             label = paste('Acclimated~',"italic(R)^2 ==", sprintf("%.2f",r_sqrt))) %>%
   summarise_all(unique)
 
 df_A_annot_n_t <- df %>% 
-  filter(acclimation == FALSE) %>%
+  filter(acclimation == "No acclimated") %>%
   group_by(scheme, acclimation) %>% 
   summarise(r_sqrt = cor(A, a_pred, use = "pairwise.complete.obs")^2,
             label = paste('No~acclimated~',"italic(R)^2 ==", sprintf("%.2f",r_sqrt))) %>%
@@ -336,7 +445,7 @@ df_A_annot_n_t <- df %>%
 
 p1 =
   df %>% 
-  # filter(acclimation == TRUE) %>%  
+  # filter(acclimation == "Acclimated") %>%  
   ggplot(mapping = aes(x=a_pred, y=A, 
                        fill = acclimation, 
                        color = acclimation,
@@ -366,14 +475,14 @@ p1
 
 
 df_g_annot_t <- df %>% 
-  filter(acclimation == TRUE) %>%
+  filter(acclimation == "Acclimated") %>%
   group_by(scheme, acclimation) %>% 
   summarise(r_sqrt = cor(gC, g_pred, use = "pairwise.complete.obs")^2,
             label = paste('Acclimated~',"italic(R)^2 ==", sprintf("%.2f",r_sqrt))) %>%
   summarise_all(unique)
 
 df_g_annot_n_t <- df %>% 
-  filter(acclimation == FALSE) %>%
+  filter(acclimation == "No acclimated") %>%
   group_by(scheme, acclimation) %>% 
   summarise(r_sqrt = cor(gC, g_pred, use = "pairwise.complete.obs")^2,
             label = paste('No~acclimated~',"italic(R)^2 ==", sprintf("%.2f",r_sqrt))) %>%
@@ -381,7 +490,7 @@ df_g_annot_n_t <- df %>%
 
 p2 =
   df %>% 
-  # filter(acclimation == TRUE) %>%  
+  # filter(acclimation == "Acclimated") %>%  
   ggplot(mapping = aes(x=g_pred, y=gC, 
                        fill = acclimation, 
                        color = acclimation,
@@ -411,14 +520,14 @@ p2
 
 
 df_c_annot_t <- df %>% 
-  filter(acclimation == TRUE) %>%
+  filter(acclimation == "Acclimated") %>%
   group_by(scheme, acclimation) %>% 
   summarise(r_sqrt = cor(chi, c_pred, use = "pairwise.complete.obs")^2,
             label = paste('Acclimated~',"italic(R)^2 ==", sprintf("%.2f",r_sqrt))) %>%
   summarise_all(unique)
 
 df_c_annot_n_t <- df %>% 
-  filter(acclimation == FALSE) %>%
+  filter(acclimation == "No acclimated") %>%
   group_by(scheme, acclimation) %>% 
   summarise(r_sqrt = cor(chi, c_pred, use = "pairwise.complete.obs")^2,
             label = paste('No~acclimated~',"italic(R)^2 ==", sprintf("%.2f",r_sqrt))) %>%
@@ -426,7 +535,7 @@ df_c_annot_n_t <- df %>%
 
 p3 =
   df %>% 
-  # filter(acclimation == TRUE) %>%  
+  # filter(acclimation == "Acclimated") %>%  
   ggplot(mapping = aes(x=c_pred, y=chi, 
                        fill = acclimation, 
                        color = acclimation,
@@ -458,14 +567,14 @@ p3
 
 
 df_d_annot_t <- df %>% 
-  filter(acclimation == TRUE, !scheme%in%c('WUE',"CGAIN"),Dpsi>=0) %>%
+  filter(acclimation == "Acclimated", !scheme%in%c('WUE',"CGAIN"),Dpsi>=0) %>%
   group_by(scheme, acclimation) %>% 
   summarise(r_sqrt = cor(Dpsi, d_pred, use = "pairwise.complete.obs")^2,
             label = paste('Acclimated~',"italic(R)^2 ==", sprintf("%.2f",r_sqrt))) %>%
   summarise_all(unique)
 
 df_d_annot_n_t <- df %>% 
-  filter(acclimation == FALSE, !scheme%in%c('WUE',"CGAIN"),Dpsi>=0) %>%
+  filter(acclimation == "No acclimated", !scheme%in%c('WUE',"CGAIN"),Dpsi>=0) %>%
   group_by(scheme, acclimation) %>% 
   summarise(r_sqrt = cor(Dpsi, d_pred, use = "pairwise.complete.obs")^2,
             label = paste('No~acclimated~',"italic(R)^2 ==", sprintf("%.2f",r_sqrt))) %>%
