@@ -6,6 +6,10 @@ library(lmerTest)
 library(emmeans)
 library(ggpubr)
 library(tidyverse)
+library(scales)
+library(ggalt)
+library(grid)
+library(ggConvexHull)
 makeTransparent = function(col, alpha=0.7){
   rgb(t(col2rgb(col)/255), alpha = alpha)
 }
@@ -59,7 +63,10 @@ df_param <- par_data %>%
                                     "phydro_wang","phydro_sox",
                                     "phydro_wang_mod","phydro_sox_mod",
                                     "phydro_sperry"),
-                         labels = c("WUE",'CMAX','CGAIN','PHYDRO','PROFITMAX2net','SOXnet','PROFITMAX2','SOX','PROFITMAX')) 
+                         labels = c("WUE",'CMAX','CGAIN','PHYDRO','PROFITMAX2net','SOXnet','PROFITMAX2','SOX','PROFITMAX')) ,
+         acclimation = factor(acclimation, 
+                              levels = c('TRUE','FALSE'),
+                              labels = c("Acclimated", "No acclimated"))
   )%>% 
   filter(!scheme %in% c('PROFITMAX2_alt',
                         'SOX_alt'))
@@ -183,7 +190,7 @@ p1 <- df_a %>%
   mytheme2()+
   theme(legend.title = element_blank())+
   xlab("")+
-  ylab(expression(" Assimilation rate r Pearson's correlation"))+
+  ylab(expression("Assimilation rate r Pearson's correlation"))+
   scale_color_manual(values = c("#A6611A","#018571"))+
   scale_fill_manual(values =c("#DFC27D","#80CDC1"))+
   scale_shape_manual(values = c(1, 19))+
@@ -1020,197 +1027,281 @@ df %>%
 
 
 
+################################################################################
+#### SIMULATION + PARAMETERS ANALYSIS
+################################################################################
+col_df <- tibble(scheme = factor(c("phydro_wue","phydro_cmax",
+                              "phydro_cgain", "phydro",
+                              "phydro_wang_mod","phydro_sox_mod",
+                              "phydro_sperry"),
+                        levels = c("phydro_wue","phydro_cmax",
+                                     "phydro_cgain", "phydro",
+                                     "phydro_wang_mod","phydro_sox_mod",
+                                     "phydro_sperry"),
+                        labels = c("WUE",'CMAX','CGAIN','PHYDRO','PROFITMAX2','SOX','PROFITMAX')),
+                 col = brewer_pal(palette = "Dark2")(8)
+                 )
+
+df_a_diff <- df %>% 
+  group_by(scheme,acclimation,Species) %>% 
+  filter(!is.na(A)) %>% 
+  select(- dpsi) %>% 
+  mutate(diff_a = A - a_pred) %>% 
+  summarise(n_dist = n(),
+            r = cor(A, a_pred, use = "pairwise.complete.obs"),
+            bias = mean(diff_a,na.rm = TRUE)/mean(A,na.rm = TRUE),
+            rmse = Metrics::rmse(A,a_pred),
+            beta = lm(A~a_pred)$coefficients[2]) %>%
+  left_join(df_param%>% 
+              select(- c(dpsi,convergence, inst))) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = acclimation, values_from = c(5:13)) %>% 
+  mutate(r_diff = r_Acclimated - `r_No acclimated`,
+         bias_diff = bias_Acclimated - `bias_No acclimated`,
+         rmse_diff = rmse_Acclimated - `rmse_No acclimated`,
+         beta_diff = beta_Acclimated - `beta_No acclimated`,
+         K.scale_diff = K.scale_Acclimated - `K.scale_No acclimated`,
+         psi50_diff = psi50_Acclimated - `psi50_No acclimated`,
+         b_diff = b_Acclimated - `b_No acclimated`,
+         gamma_diff = gamma_Acclimated - `gamma_No acclimated`
+  ) 
+
+# A - r Pearson's
+p1 <- df_a_diff %>%
+  ggplot(aes(K.scale_diff, r_diff, color = scheme, group = scheme))+
+  geom_hline(yintercept = 0, color = "grey20", linetype = 3)+
+  geom_vline(xintercept = 0, color = "grey20", linetype = 3)+
+  # geom_encircle()+
+  geom_convexhull(alpha=0, fill = "transparent", size = 1.3, show.legend = FALSE)+
+  geom_point()+
+  # geom_density_2d()+
+  mytheme2()+
+  theme(legend.title = element_blank())+
+  scale_colour_manual(breaks = col_df$scheme, 
+                      values = unique(as.character(col_df$col)))+
+  # scale_color_manual(values = brewer_pal(palette = "RdYlGn")(4))+
+  # ylab(expression("(Acclimated - No acclimated) A rate r Pearson's correlation"))+
+  ylab("")+
+  xlab(expression(Delta*"K"))
+
+p2 <- df_a_diff%>% 
+  ggplot(aes(psi50_diff, r_diff, color = scheme, group = scheme))+
+  geom_hline(yintercept = 0, color = "grey20", linetype = 3)+
+  geom_vline(xintercept = 0, color = "grey20", linetype = 3)+
+  # geom_encircle()+
+  geom_convexhull(alpha=0, fill = "transparent", size = 1.3, show.legend = FALSE)+
+  geom_point()+
+  # geom_density_2d()+
+  mytheme2()+
+  theme(legend.title = element_blank())+
+  scale_colour_manual(breaks = col_df$scheme, 
+                      values = unique(as.character(col_df$col)))+
+  # scale_color_manual(values = brewer_pal(palette = "RdYlGn")(4))+
+  # ylab(expression("(Acclimated - No acclimated) A rate r Pearson's correlation"))+
+  ylab("")+
+  xlab(expression(Delta*psi[50]))
+
+p3 <- df_a_diff %>% 
+  filter(!scheme %in% c("WUE","CGAIN","CMAX",'PHYDRO')) %>% 
+  ggplot(aes(b_diff, r_diff, color = scheme, group = scheme))+
+  geom_hline(yintercept = 0, color = "grey20", linetype = 3)+
+  geom_vline(xintercept = 0, color = "grey20", linetype = 3)+
+  # geom_encircle()+
+  geom_convexhull(alpha=0, fill = "transparent", size = 1.3, show.legend = FALSE)+
+  geom_point()+
+  # geom_density_2d()+
+  mytheme2()+
+  theme(legend.title = element_blank())+
+  scale_colour_manual(breaks = col_df$scheme, 
+                      values = unique(as.character(col_df$col)))+
+  # scale_color_manual(values = brewer_pal(palette = "RdYlGn")(3))+
+  # ylab(expression("(Acclimated - No acclimated) A rate r Pearson's correlation"))+
+  ylab("")+
+  xlab(expression(Delta*"b"))
+
+p4 <- df_a_diff %>% 
+  filter(scheme %in% c("WUE","CGAIN","CMAX",'PHYDRO')) %>% 
+  ggplot(aes(gamma_diff, r_diff, color = scheme, group = scheme))+
+  geom_hline(yintercept = 0, color = "grey20", linetype = 3)+
+  geom_vline(xintercept = 0, color = "grey20", linetype = 3)+
+  # geom_encircle()+
+  geom_convexhull(alpha=0, fill = "transparent", size = 1.3, show.legend = FALSE)+
+  geom_point()+
+  # geom_density_2d()+
+  mytheme2()+
+  theme(legend.title = element_blank())+
+  scale_colour_manual(breaks = col_df$scheme, 
+                      values = unique(as.character(col_df$col)))+
+  # scale_color_manual(values = brewer_pal(palette = "RdYlGn")(4))+
+  # ylab(expression("(Acclimated - No acclimated) A rate r Pearson's correlation"))+
+  ylab("")+
+  xlab(expression(Delta*gamma))
+
+
+annotate_figure(
+  ggarrange(p1,p2,p3,p4, 
+          align='hv', labels=c('a', 'b','c','d'),
+          common.legend = T,ncol=2, nrow = 2),
+  left = textGrob("(Acclimated - No acclimated) A rate r Pearson's correlation", 
+                  rot = 90, vjust = 1, gp = gpar(cex = 1)))
 
 
 
+# A - RMSE
+p1 <- df_a_diff %>%
+  ggplot(aes(K.scale_diff, rmse_diff, color = scheme, group = scheme))+
+  geom_hline(yintercept = 0, color = "grey20", linetype = 3)+
+  geom_vline(xintercept = 0, color = "grey20", linetype = 3)+
+  # geom_encircle()+
+  geom_convexhull(alpha=0, fill = "transparent", size = 1.3, show.legend = FALSE)+
+  geom_point()+
+  # geom_density_2d()+
+  mytheme2()+
+  theme(legend.title = element_blank())+
+  scale_colour_manual(breaks = col_df$scheme, 
+                      values = unique(as.character(col_df$col)))+
+  # scale_color_manual(values = brewer_pal(palette = "RdYlGn")(4))+
+  # ylab(expression("(Acclimated - No acclimated) A rate r Pearson's correlation"))+
+  ylab("")+
+  xlab(expression(Delta*"K"))
+
+p2 <- df_a_diff %>%
+  ggplot(aes(psi50_diff, rmse_diff, color = scheme, group = scheme))+
+  geom_hline(yintercept = 0, color = "grey20", linetype = 3)+
+  geom_vline(xintercept = 0, color = "grey20", linetype = 3)+
+  # geom_encircle()+
+  geom_convexhull(alpha=0, fill = "transparent", size = 1.3, show.legend = FALSE)+
+  geom_point()+
+  # geom_density_2d()+
+  mytheme2()+
+  theme(legend.title = element_blank())+
+  scale_colour_manual(breaks = col_df$scheme, 
+                      values = unique(as.character(col_df$col)))+
+  # scale_color_manual(values = brewer_pal(palette = "RdYlGn")(4))+
+  # ylab(expression("(Acclimated - No acclimated) A rate r Pearson's correlation"))+
+  ylab("")+
+  xlab(expression(Delta*psi[50]))
+
+p3 <- df_a_diff %>% 
+  filter(!scheme %in% c("WUE","CGAIN","CMAX",'PHYDRO')) %>% 
+  ggplot(aes(b_diff, rmse_diff, color = scheme, group = scheme))+
+  geom_hline(yintercept = 0, color = "grey20", linetype = 3)+
+  geom_vline(xintercept = 0, color = "grey20", linetype = 3)+
+  # geom_encircle()+
+  geom_convexhull(alpha=0, fill = "transparent", size = 1.3, show.legend = FALSE)+
+  geom_point()+
+  # geom_density_2d()+
+  mytheme2()+
+  theme(legend.title = element_blank())+
+  scale_colour_manual(breaks = col_df$scheme, 
+                      values = unique(as.character(col_df$col)))+
+  # scale_color_manual(values = brewer_pal(palette = "RdYlGn")(3))+
+  # ylab(expression("(Acclimated - No acclimated) A rate r Pearson's correlation"))+
+  ylab("")+
+  xlab(expression(Delta*"b"))
+
+p4 <- df_a_diff %>%
+  filter(scheme %in% c("WUE","CGAIN","CMAX",'PHYDRO')) %>% 
+  ggplot(aes(gamma_diff, rmse_diff, color = scheme, group = scheme))+
+  geom_hline(yintercept = 0, color = "grey20", linetype = 3)+
+  geom_vline(xintercept = 0, color = "grey20", linetype = 3)+
+  # geom_encircle()+
+  geom_convexhull(alpha=0, fill = "transparent", size = 1.3, show.legend = FALSE)+
+  geom_point()+
+  # geom_density_2d()+
+  mytheme2()+
+  theme(legend.title = element_blank())+
+  scale_colour_manual(breaks = col_df$scheme, 
+                      values = unique(as.character(col_df$col)))+
+  # scale_color_manual(values = brewer_pal(palette = "RdYlGn")(4))+
+  # ylab(expression("(Acclimated - No acclimated) A rate r Pearson's correlation"))+
+  ylab("")+
+  xlab(expression(Delta*gamma))
 
 
-#########################
-
-df_A_annot_t <- df %>% 
-  filter(acclimation == "Acclimated") %>%
-  group_by(scheme, acclimation) %>% 
-  summarise(r_sqrt = cor(A, a_pred, use = "pairwise.complete.obs")^2,
-            label = paste('Acclimated~',"italic(R)^2 ==", sprintf("%.2f",r_sqrt))) %>%
-  summarise_all(unique)
-
-df_A_annot_n_t <- df %>% 
-  filter(acclimation == "No acclimated") %>%
-  group_by(scheme, acclimation) %>% 
-  summarise(r_sqrt = cor(A, a_pred, use = "pairwise.complete.obs")^2,
-            label = paste('No~acclimated~',"italic(R)^2 ==", sprintf("%.2f",r_sqrt))) %>%
-  summarise_all(unique)
-
-p1 =
-  df %>% 
-  # filter(acclimation == "Acclimated") %>%  
-  ggplot(mapping = aes(x=a_pred, y=A, 
-                       fill = acclimation, 
-                       color = acclimation,
-                       group = interaction(scheme,acclimation))) + 
-  mytheme()+
-  geom_point( shape=21, color=makeTransparent("black",0)) + 
-  geom_smooth(method = "lm", se = F)+
-  geom_abline(slope = 1, intercept=0, color="grey") +
-  # scale_fill_gradient(oob=squish, limits = c(-4,0), low = makeTransparent("goldenrod1"), high = makeTransparent("blue"))+
-  # scale_fill_viridis_c(oob=squish, limits = c(-1,0), direction = -1, begin=.25)+
-  # labs(fill = expression(psi[s]*"/|"*psi[g88]*"|"))+
-  geom_text(data = df_A_annot_t,
-            aes(x = 1, y = 20, label = label), parse=TRUE,hjust = 0)+
-  geom_text(data = df_A_annot_n_t,
-            aes(x = 1, y = 17, label = label), parse=TRUE,hjust = 0)+
-  facet_wrap(~scheme)+
-  xlab(expression(textstyle("Predicted A")))+
-  ylab(expression(textstyle("Observed A")))+
-  ggtitle(expression(atop("Assimilation rate,", italic(A)*" ("*mu*"mol m"^-2~"s"^-1*")")))+
-  scale_color_manual(values = c("#A6611A","#018571"))+
-  scale_fill_manual(values =c("#DFC27D","#80CDC1"))
-
-p1
+annotate_figure(
+  ggarrange(p1,p2,p3,p4, 
+            align='hv', labels=c('a', 'b','c','d'),
+            common.legend = T,ncol=2, nrow = 2),
+  left = textGrob("(Acclimated - No acclimated) A rate RMSE", 
+                  rot = 90, vjust = 1, gp = gpar(cex = 1)))
 
 
+# A - BIAS
+p1 <- df_a_diff %>%
+  ggplot(aes(K.scale_diff, bias_diff, color = scheme, group = scheme))+
+  geom_hline(yintercept = 0, color = "grey20", linetype = 3)+
+  geom_vline(xintercept = 0, color = "grey20", linetype = 3)+
+  # geom_encircle()+
+  geom_convexhull(alpha=0, fill = "transparent", size = 1.3, show.legend = FALSE)+
+  geom_point()+
+  # geom_density_2d()+
+  mytheme2()+
+  theme(legend.title = element_blank())+
+  scale_colour_manual(breaks = col_df$scheme, 
+                      values = unique(as.character(col_df$col)))+
+  # scale_color_manual(values = brewer_pal(palette = "RdYlGn")(4))+
+  # ylab(expression("(Acclimated - No acclimated) A rate r Pearson's correlation"))+
+  ylab("")+
+  xlab(expression(Delta*"K"))
+
+p2 <- df_a_diff %>%
+  ggplot(aes(psi50_diff, bias_diff, color = scheme, group = scheme))+
+  geom_hline(yintercept = 0, color = "grey20", linetype = 3)+
+  geom_vline(xintercept = 0, color = "grey20", linetype = 3)+
+  # geom_encircle()+
+  geom_convexhull(alpha=0, fill = "transparent", size = 1.3, show.legend = FALSE)+
+  geom_point()+
+  # geom_density_2d()+
+  mytheme2()+
+  theme(legend.title = element_blank())+
+  scale_colour_manual(breaks = col_df$scheme, 
+                      values = unique(as.character(col_df$col)))+
+  # scale_color_manual(values = brewer_pal(palette = "RdYlGn")(4))+
+  # ylab(expression("(Acclimated - No acclimated) A rate r Pearson's correlation"))+
+  ylab("")+
+  xlab(expression(Delta*psi[50]))
+
+p3 <- df_a_diff %>% 
+  filter(!scheme %in% c("WUE","CGAIN","CMAX",'PHYDRO')) %>% 
+  ggplot(aes(b_diff, bias_diff, color = scheme, group = scheme))+
+  geom_hline(yintercept = 0, color = "grey20", linetype = 3)+
+  geom_vline(xintercept = 0, color = "grey20", linetype = 3)+
+  # geom_encircle()+
+  geom_convexhull(alpha=0, fill = "transparent", size = 1.3, show.legend = FALSE)+
+  geom_point()+
+  # geom_density_2d()+
+  mytheme2()+
+  theme(legend.title = element_blank())+
+  scale_colour_manual(breaks = col_df$scheme, 
+                      values = unique(as.character(col_df$col)))+
+  # scale_color_manual(values = brewer_pal(palette = "RdYlGn")(3))+
+  # ylab(expression("(Acclimated - No acclimated) A rate r Pearson's correlation"))+
+  ylab("")+
+  xlab(expression(Delta*"b"))
+
+p4 <- df_a_diff %>%
+  filter(scheme %in% c("WUE","CGAIN","CMAX",'PHYDRO')) %>% 
+  ggplot(aes(gamma_diff, bias_diff, color = scheme, group = scheme))+
+  geom_hline(yintercept = 0, color = "grey20", linetype = 3)+
+  geom_vline(xintercept = 0, color = "grey20", linetype = 3)+
+  # geom_encircle()+
+  geom_convexhull(alpha=0, fill = "transparent", size = 1.3, show.legend = FALSE)+
+  geom_point()+
+  # geom_density_2d()+
+  mytheme2()+
+  theme(legend.title = element_blank())+
+  scale_colour_manual(breaks = col_df$scheme, 
+                      values = unique(as.character(col_df$col)))+
+  # scale_color_manual(values = brewer_pal(palette = "RdYlGn")(4))+
+  # ylab(expression("(Acclimated - No acclimated) A rate r Pearson's correlation"))+
+  ylab("")+
+  xlab(expression(Delta*gamma))
 
 
-
-df_g_annot_t <- df %>% 
-  filter(acclimation == "Acclimated") %>%
-  group_by(scheme, acclimation) %>% 
-  summarise(r_sqrt = cor(chi, c_pred, use = "pairwise.complete.obs")^2,
-            label = paste('Acclimated~',"italic(R)^2 ==", sprintf("%.2f",r_sqrt))) %>%
-  summarise_all(unique)
-
-df_g_annot_n_t <- df %>% 
-  filter(acclimation == "No acclimated") %>%
-  group_by(scheme, acclimation) %>% 
-  summarise(r_sqrt = cor(chi, c_pred, use = "pairwise.complete.obs")^2,
-            label = paste('No~acclimated~',"italic(R)^2 ==", sprintf("%.2f",r_sqrt))) %>%
-  summarise_all(unique)
-
-p2 =
-  df %>% 
-  # filter(acclimation == "Acclimated") %>%  
-  ggplot(mapping = aes(x=c_pred, y=chi, 
-                       fill = acclimation, 
-                       color = acclimation,
-                       group = interaction(scheme,acclimation))) + 
-  mytheme()+
-  geom_point( shape=21, color=makeTransparent("black",0)) + 
-  geom_smooth(method = "lm", se = F)+
-  geom_abline(slope = 1, intercept=0, color="grey") +
-  # scale_fill_gradient(oob=squish, limits = c(-4,0), low = makeTransparent("goldenrod1"), high = makeTransparent("blue"))+
-  # scale_fill_viridis_c(oob=squish, limits = c(-1,0), direction = -1, begin=.25)+
-  # labs(fill = expression(psi[s]*"/|"*psi[g88]*"|"))+
-  geom_text(data = df_g_annot_t,
-            aes(x = 0, y = 0.3, label = label), parse=TRUE,hjust = 0)+
-  geom_text(data = df_g_annot_n_t,
-            aes(x = 0, y = 0.27, label = label), parse=TRUE,hjust = 0)+
-  facet_wrap(~scheme)+
-  xlab(expression("Predicted g"[s]))+
-  ylab(expression("Observed g"[s]))+
-  ggtitle(expression(atop("Stomatal conductance,","g"[s]~"(mol m"^-2~"s"^-1*")")))+
-  scale_color_manual(values = c("#A6611A","#018571"))+
-  scale_fill_manual(values =c("#DFC27D","#80CDC1"))
-
-p2
-
-
-
-
-
-df_c_annot_t <- df %>% 
-  filter(acclimation == "Acclimated") %>%
-  group_by(scheme, acclimation) %>% 
-  summarise(r_sqrt = cor(chi, c_pred, use = "pairwise.complete.obs")^2,
-            label = paste('Acclimated~',"italic(R)^2 ==", sprintf("%.2f",r_sqrt))) %>%
-  summarise_all(unique)
-
-df_c_annot_n_t <- df %>% 
-  filter(acclimation == "No acclimated") %>%
-  group_by(scheme, acclimation) %>% 
-  summarise(r_sqrt = cor(chi, c_pred, use = "pairwise.complete.obs")^2,
-            label = paste('No~acclimated~',"italic(R)^2 ==", sprintf("%.2f",r_sqrt))) %>%
-  summarise_all(unique)
-
-p3 =
-  df %>% 
-  # filter(acclimation == "Acclimated") %>%  
-  ggplot(mapping = aes(x=c_pred, y=chi, 
-                       fill = acclimation, 
-                       color = acclimation,
-                       group = interaction(scheme,acclimation))) + 
-  mytheme()+
-  geom_point( shape=21, color=makeTransparent("black",0)) + 
-  geom_smooth(method = "lm", se = F)+
-  geom_abline(slope = 1, intercept=0, color="grey") +
-  # scale_fill_gradient(oob=squish, limits = c(-4,0), low = makeTransparent("goldenrod1"), high = makeTransparent("blue"))+
-  # scale_fill_viridis_c(oob=squish, limits = c(-1,0), direction = -1, begin=.25)+
-  # labs(fill = expression(psi[s]*"/|"*psi[g88]*"|"))+
-  geom_text(data = df_c_annot_t,
-            aes(x = 0.7, y = 0.43, label = label), parse=TRUE,hjust = 0)+
-  geom_text(data = df_c_annot_n_t,
-            aes(x = 0.7, y = 0.37, label = label), parse=TRUE,hjust = 0)+
-  facet_wrap(~scheme)+
-  xlab(expression("Predicted"~chi))+
-  ylab(expression("Observed"~chi))+
-  ggtitle(expression(atop("Leaf internal-to-","ambient CO"[2]~"ratio,"~italic(chi))))+
-  scale_color_manual(values = c("#A6611A","#018571"))+
-  scale_fill_manual(values =c("#DFC27D","#80CDC1"))
-
-p3
-
-
-
-
-
-
-
-df_d_annot_t <- df %>% 
-  filter(acclimation == "Acclimated", !scheme%in%c('WUE',"CGAIN"),Dpsi>=0) %>%
-  group_by(scheme, acclimation) %>% 
-  summarise(r_sqrt = cor(Dpsi, d_pred, use = "pairwise.complete.obs")^2,
-            label = paste('Acclimated~',"italic(R)^2 ==", sprintf("%.2f",r_sqrt))) %>%
-  summarise_all(unique)
-
-df_d_annot_n_t <- df %>% 
-  filter(acclimation == "No acclimated", !scheme%in%c('WUE',"CGAIN"),Dpsi>=0) %>%
-  group_by(scheme, acclimation) %>% 
-  summarise(r_sqrt = cor(Dpsi, d_pred, use = "pairwise.complete.obs")^2,
-            label = paste('No~acclimated~',"italic(R)^2 ==", sprintf("%.2f",r_sqrt))) %>%
-  summarise_all(unique)
-
-p4 =
-  df %>% 
-  filter(Dpsi>=0, !scheme%in%c('WUE',"CGAIN")) %>%  
-  ggplot(mapping = aes(x=d_pred, y=Dpsi, 
-                       fill = acclimation, 
-                       color = acclimation,
-                       group = interaction(scheme,acclimation))) + 
-  mytheme()+
-  geom_point( shape=21, color=makeTransparent("black",0)) + 
-  geom_smooth(method = "lm", se = F)+
-  geom_abline(slope = 1, intercept=0, color="grey") +
-  # scale_fill_gradient(oob=squish, limits = c(-4,0), low = makeTransparent("goldenrod1"), high = makeTransparent("blue"))+
-  # scale_fill_viridis_c(oob=squish, limits = c(-1,0), direction = -1, begin=.25)+
-  # labs(fill = expression(psi[s]*"/|"*psi[g88]*"|"))+
-  geom_text(data = df_d_annot_t,
-            aes(x = 1, y = 0.55, label = label), parse=TRUE,hjust = 0)+
-  geom_text(data = df_d_annot_n_t,
-            aes(x = 1, y = 0.4, label = label), parse=TRUE,hjust = 0)+
-  facet_wrap(~scheme)+
-  xlab(expression("Predicted"~Delta*psi))+
-  ylab(expression("Observed"~Delta*psi)) + 
-  ggtitle(expression(atop("Soil-leaf water-potential","difference,"~italic(Delta*psi)~"(MPa)")))+
-  scale_color_manual(values = c("#A6611A","#018571"))+
-  scale_fill_manual(values =c("#DFC27D","#80CDC1"))
-
-p4
-
-
-
-
-
-# png(filename = "calibration_validation_viridis_wtrend_g88_2.png", width = 820*3, height = 650*3, res=300)
-cowplot::plot_grid(p1,p5, labels=LETTERS, label_size = 16, label_colour = "grey50", label_x = 0.05, align = "hv", rel_widths = 1, ncol=2)
-cowplot::plot_grid(p2,p6,labels=LETTERS, label_size = 16, label_colour = "grey50", label_x = 0.05, align = "hv", rel_widths = 1, ncol=2)
-cowplot::plot_grid( p3,p7, labels=LETTERS, label_size = 16, label_colour = "grey50", label_x = 0.05, align = "hv", rel_widths = 1, ncol=2)
-cowplot::plot_grid( p4,p8, labels=LETTERS, label_size = 16, label_colour = "grey50", label_x = 0.05, align = "hv", rel_widths = 1, ncol=2)
+annotate_figure(
+  ggarrange(p1,p2,p3,p4, 
+            align='hv', labels=c('a', 'b','c','d'),
+            common.legend = T,ncol=2, nrow = 2),
+  left = textGrob("(Acclimated - No acclimated) A rate BIAS", 
+                  rot = 90, vjust = 1, gp = gpar(cex = 1)))
