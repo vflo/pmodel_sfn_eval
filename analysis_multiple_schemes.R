@@ -51,9 +51,9 @@ par_data <- list.files(path_par) %>%
 #                          "Quercus ilex","Quercus suber"
 #   ))
 df_param <- par_data %>% 
-  filter(dpsi == TRUE & scheme %in% c("phydro")|
-           dpsi == FALSE & !scheme %in% c("phydro")) %>%
-  # filter(dpsi == FALSE) %>%
+  # filter(dpsi == TRUE & scheme %in% c("phydro")|
+  #          dpsi == FALSE & !scheme %in% c("phydro")) %>%
+  filter(dpsi == TRUE) %>%
   # filter(dpsi == TRUE & !scheme %in% c("phydro_wue","phydro_cgain",'phydro_wang_mod','phydro_sox')|
   #          dpsi == FALSE & scheme %in% c("phydro_wue","phydro_cgain",'phydro_wang_mod','phydro_sox')) %>%
   # rbind(par_data_extra) %>%
@@ -68,8 +68,8 @@ df_param <- par_data %>%
                               levels = c('TRUE','FALSE'),
                               labels = c("Acclimated", "No acclimated"))
   )%>% 
-  filter(!scheme %in% c('PROFITMAX2_alt',
-                        'SOX_alt'))
+  filter(!scheme %in% c('PROFITMAX2net',
+                        'SOXnet'))
 # 
 # df_param %>% 
 #   ggplot(aes(scheme, log(K.scale), color = acclimation))+
@@ -129,9 +129,9 @@ df_param %>%
 #### SIMULATIONS RESULTS ####
 
 df <- df %>% 
-  filter(dpsi == TRUE & scheme %in% c("phydro")|
-           dpsi == FALSE & !scheme %in% c("phydro")) %>%
-  # filter(dpsi == FALSE) %>%
+  # filter(dpsi == TRUE & scheme %in% c("phydro")|
+  #          dpsi == FALSE & !scheme %in% c("phydro")) %>%
+  filter(dpsi == FALSE) %>%
   mutate(chi = Ciest/ca,
          scheme = factor(scheme, 
                          levels = c("phydro_wue","phydro_cmax",

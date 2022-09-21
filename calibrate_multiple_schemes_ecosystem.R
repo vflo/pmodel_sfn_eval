@@ -42,7 +42,7 @@ opt_curve_param_2 <- function(par,psi50,d,c){
 
 
 #Import meteo data from Caldes de Montbui Automatic Meteorological Station https://www.meteo.cat/observacions/xema/dades?codi=X9&dia=2021-09-15T00:00Z
-meteo_caldes_2019 <-  read_csv("DATA/METEO_CALDES_2019.csv")
+dat <-  read_csv("DATA/FR_Pue_HH_EC+Sap.csv")
 #Summarise central meteo data at the daily scale
 meteo <- meteo_caldes_2019 %>% 
   dplyr::select(-hour) %>% 
@@ -279,19 +279,21 @@ error_fun_no_accl = function(x, data, plot=F, scale = 1,
                              stomatal_model = stomatal_model_now,
                              vcmax = vcmax,
                              jmax = jmax, 
-                             Species_now = species,
-                             K_sperry = K_sperry_no_acclimate){
-
+                             Species_now = species){
+  x = x*scale
+  
   if(stomatal_model %in% par_scheme){
       par_plant_now = list(
-        conductivity = K_sperry$K_sperry*1e-16,
+        conductivity = x[1]*1e-16,
         psi50 = -data$P50 %>% unique(),
         b = data$b_alt%>% unique()
       )
     par_cost_now = list(
       alpha = 0.1,
-      gamma = x[1]
+      gamma = x[2]
     )
+    if(x[1]<=0 | x[1]>1e4 | x[2] < 0
+    ){over <- TRUE}else{over <- FALSE} #set boundaries
   }else{
     par_plant_now = list(
       conductivity = x[1]*1e-16,
@@ -301,12 +303,18 @@ error_fun_no_accl = function(x, data, plot=F, scale = 1,
     par_cost_now = list(
       alpha  = 0.1
     )
+    if(x[1]<=0| x[1]>1e4 
+    ){over <- TRUE}else{over <- FALSE} #set boundaries
   }
   
+  if(over){
+    print(paste("Over-limits"))
+    return(1e6)
+  }else{
     p_crit = par_plant_now$psi50 * (log(1000)/log(2)) ^ ( 1/par_plant_now$b)
     ndays = mean(data$Drydown.days)
-    psi_min = min(data$LWP)# -6
-    # psi_min = p_crit
+    # psi_min = min(data$LWP)# -6
+    psi_min = p_crit
     psi_max = 0 #max(data$LWP)
     # cat(ndays,"\n")
     
@@ -342,7 +350,7 @@ error_fun_no_accl = function(x, data, plot=F, scale = 1,
         mutate(var = case_when(var>0~0,
                                TRUE~var),,
                p = purrr::pmap(list(var, jmax_a, vcmax_a), 
-                               ~model_numerical_instantaneous(tc = mean(data$T), 
+                               ~model_numerical_instantaneous_gs(tc = mean(data$T), 
                                                               ppfd = mean(data$Iabs_used), 
                                                               vpd = mean(data$D*101325), 
                                                               co2 = mean(data$ca), elv = 0, 
@@ -388,7 +396,10 @@ error_fun_no_accl = function(x, data, plot=F, scale = 1,
     cat(x, "|", y1, "/ ", y2, " / ", y, "\n")
     cat(x, "|", y, "\n")
   
+  
+  x0 <<- x
   y
+  }
 }
 
 
@@ -396,18 +407,21 @@ error_fun_no_accl = function(x, data, plot=F, scale = 1,
 
 error_fun = function(x, data,  plot=F, scale = 1, 
                      dpsi_calib=T, k=7, stomatal_model = stomatal_model_now, 
-                     Species_now = species,K_sperry = K_sperry_acclimate){
+                     Species_now = species){
+  x = x*scale
   
   if(stomatal_model %in% par_scheme){
     par_plant_now = list(
-      conductivity = K_sperry$K_sperry*1e-16,
+      conductivity = x[1]*1e-16,
       psi50 = -data$P50%>% unique(),
       b = data$b_alt%>% unique()
     )
     par_cost_now = list(
       alpha = 0.1,
-      gamma = x[1]
+      gamma = x[2]
     )
+    if(x[1]<=0 | x[1]>1e4 | x[2] < 0
+    ){over <- TRUE}else{over <- FALSE} #set boundaries
   }else{
     par_plant_now = list(
       conductivity = x[1]*1e-16,
@@ -417,11 +431,17 @@ error_fun = function(x, data,  plot=F, scale = 1,
     par_cost_now = list(
       alpha  = 0.1
     )
+    if(x[1]<=0| x[1]>1e4 
+    ){over <- TRUE}else{over <- FALSE} #set boundaries
   }
+  if(over){
+    print(paste("Over-limits"))
+    return(1e6)
+  }else{
       p_crit = par_plant_now$psi50 * (log(1000)/log(2)) ^ ( 1/par_plant_now$b)
       ndays = mean(data$Drydown.days)
-      psi_min = min(data$LWP)# -6
-      # psi_min = p_crit
+      # psi_min = min(data$LWP)# -6
+      psi_min = p_crit
       psi_max = 0 #max(data$LWP)
       # cat(ndays,"\n")
       
@@ -466,7 +486,7 @@ error_fun = function(x, data,  plot=F, scale = 1,
       dat_acc = tibble(var = spl(day)) %>% 
         mutate(var = case_when(var>0~0,
                                TRUE~var),
-               pmod = map(var, ~model_numerical(tc = mean(data$T), ppfd = mean(data$Iabs_used), 
+               pmod = map(var, ~model_numerical_gs(tc = mean(data$T), ppfd = mean(data$Iabs_used), 
                                                 vpd = mean(data$D*101325), co2 = mean(data$ca), 
                                                 elv = 0, fapar = .99, kphio = 0.087, 
                                                 psi_soil = ., rdark = 0.02, par_plant=par_plant_now, 
@@ -474,7 +494,7 @@ error_fun = function(x, data,  plot=F, scale = 1,
         unnest_wider(pmod)
       dat1 = tibble(var = lwp, jmax_a=dat_acc$jmax, vcmax_a=dat_acc$vcmax) %>%
         mutate(p = purrr::pmap(list(var, jmax_a, vcmax_a), 
-                               ~model_numerical_instantaneous(tc = mean(data$T), 
+                               ~model_numerical_instantaneous_gs(tc = mean(data$T), 
                                                               ppfd = mean(data$Iabs_used), 
                                                               vpd = mean(data$D*101325), 
                                                               co2 = mean(data$ca), elv = 0, 
@@ -520,8 +540,10 @@ error_fun = function(x, data,  plot=F, scale = 1,
     cat(x, "|", y1, "/ ", y2, " / ", y, "\n")
     cat(x, "|", y, "\n")
     
+    
+    x0 <<- x
     y
-
+  }
 }
 
 
@@ -532,26 +554,12 @@ par_scheme_no_alpha <- list("phydro_wang_mod","phydro_sox_mod","phydro_sperry")
 get_parameters <- function(x){
     species = x$Species %>% unique()
     stomatal_model_now = x$scheme %>% unique()
-    dpsi_calib_now = x$dpsi_calib %>% unique()
+    dpsi_calib = x$dpsi_calib %>% unique()
     tc = x$T %>% mean(na.rm = TRUE)
     PPFD = x$PPFD %>% mean(na.rm = TRUE)
     VPD = x$VPD %>% mean(na.rm = TRUE)
     vc25 = x$Vmax298 %>% mean(na.rm = TRUE)
     j25 = x$Jmax298 %>% mean(na.rm = TRUE)
-    if(!is.null(K_sperry)){
-    K_sperry_no_acclimate = K_sperry %>% 
-      filter(Species == species,
-             acclimation == FALSE,
-             dpsi_calib == dpsi_calib_now) %>% 
-      select(K_sperry) %>% 
-      unique()
-    K_sperry_acclimate = K_sperry %>% 
-      filter(Species == species,
-             acclimation == TRUE,
-             dpsi_calib == dpsi_calib_now) %>% 
-      select(K_sperry) %>% 
-      unique()
-    }
     data1 = x
     
     ##### PARAMETERIZATION WITHOUT ACCLIMATION #####
@@ -565,36 +573,52 @@ get_parameters <- function(x){
       jmax = foo$jmax
       vcmax = foo$vcmax} 
 
+                                        
+    if(stomatal_model_now %in% par_scheme){x0 <- c(1,1)}else{x0 <- c(1)}
+    # error_fun_no_accl(x0, data1, #%>% mutate(Drydown.days=38), 
+    #                   plot=T, dpsi_file=species,
+    #                   dpsi_calib = dpsi_calib,  stomatal_model = stomatal_model_now,par_plant_no_acclimation = par_plant_no_acclimation,
+    #                   par_cost_no_acclimation = par_cost_no_acclimation)
+    
+    conv <- TRUE
+    count <- 0
+    while(all(conv , count < 2)){
       print(stomatal_model_now)
       print(species)
-      optimise(error_fun_no_accl,
-               interval = c(0,1e2),
-               data=data1,
-               dpsi_calib = dpsi_calib_now,
-               stomatal_model = stomatal_model_now,
-               vcmax = vcmax,
-               jmax = jmax, 
-               Species = species,
-               K_sperry = K_sperry_no_acclimate
-      ) -> opt_no_accl
+      optimr::optimr(par = x0/abs(x0),
+                     fn = error_fun_no_accl,
+                     data=data1,
+                     scale=abs(x0),
+                     dpsi_calib = dpsi_calib,       # Set to F if dpsi data is not available
+                     stomatal_model = stomatal_model_now,
+                     vcmax = vcmax,
+                     jmax = jmax, 
+                     Species = species,
+                     control = list(par_scale = 1, maxit=2000, all.methods = TRUE)
+      ) -> opt
+      convergence_no_accl <- opt$convergence
+      count <- count + 1
+      if(convergence_no_accl==0){conv = FALSE}else{conv = TRUE}
+    }
 
-    x_no_accl <- opt_no_accl$minimum
+    # x_no_accl <- x0
+    x_no_accl <- abs(opt$par) * x0
     
-    error_fun_no_accl(x_no_accl, data1, plot=T, dpsi_calib = dpsi_calib_now,
+    error_fun_no_accl(x_no_accl, data1, plot=T, dpsi_calib = dpsi_calib,
                       stomatal_model = stomatal_model_now, ,
                       vcmax = vcmax,
                       jmax = jmax,
-                      Species_now = species,
-                      K_sperry = K_sperry_no_acclimate)
+                      Species_now = species)
     
     if(stomatal_model_now %in% par_scheme){
       res_no_accl <- tibble(x,
                             acclimation = FALSE,
-                            K.scale=K_sperry_no_acclimate$K_sperry,
+                            K.scale=x_no_accl[1],
                             psi50= -data1$P50 %>% unique(),
                             b_used = data1$b_alt %>% unique(),
                             alpha=NA,
-                            gamma=x_no_accl[1])
+                            gamma=x_no_accl[2],
+                            convergence = convergence_no_accl)
     }else if(stomatal_model_now %in% par_scheme_no_alpha){
       res_no_accl <- tibble(x,
                             acclimation = FALSE,
@@ -602,80 +626,84 @@ get_parameters <- function(x){
                             psi50= -data1$P50 %>% unique(),
                             b_used = data1$b_alt %>% unique(),
                             alpha=NA,
-                            gamma=NA)
+                            gamma=NA,
+                            convergence = convergence_no_accl)
     }else{
       res_no_accl <- tibble(x,
                             acclimation = FALSE,
                             psi50= -data1$P50 %>% unique(),
                             b_used = data1$b_alt %>% unique(),
                             alpha=0.1,
-                            gamma=NA)
+                            gamma=NA,
+                            convergence = convergence_no_accl)
     }
 
 
 ##### PARAMETERIZATION WITH ACCLIMATION #####
+    
+    if(stomatal_model_now %in% par_scheme){x0 <- c(1,1)}else{x0 <- c(1)}
 
+# error_fun(x0, data1,# %>% mutate(Drydown.days=38),
+#           plot=T, dpsi_file=species,
+#           dpsi_calib = FALSE, inst=T, stomatal_model = stomatal_model_now)
+
+    conv <- TRUE
+    count <- 0
+    while(all(conv , count < 2)){
       print(stomatal_model_now)
       print(species)
-      optimise(error_fun,
-               interval = c(0,1e2),
-               data=data1 ,
-               dpsi_calib = dpsi_calib_now,
-               stomatal_model = stomatal_model_now, 
-               Species_now = species,
-               K_sperry = K_sperry_acclimate
+      optimr::optimr(par = x0/abs(x0),
+                     fn = error_fun,
+                     data=data1 ,# %>% mutate(Drydown.days=38),
+                     scale=abs(x0),
+                     dpsi_calib = dpsi_calib,       # Set to F if dpsi data is not available
+                     stomatal_model = stomatal_model_now, 
+                     Species_now = species,
+                     control = list(par_scale = 1, maxit=2000, all.methods = TRUE)
                      ) -> opt_accl
+      convergence_accl <- opt_accl$convergence
+      count <- count + 1
+      if(convergence_accl==0){conv = FALSE}else{conv = TRUE}
+      }
 
-    x_accl <- opt_accl$minimum
+
+    x_accl <- abs(opt_accl$par) * x0
     
-    error_fun(x_accl, data1,
-              plot=T, dpsi_calib = dpsi_calib_now,
-              stomatal_model = stomatal_model_now, Species_now = species,
-              K_sperry = K_sperry_acclimate)
+    error_fun(x_accl, data1,# %>% mutate(Drydown.days=38),
+              plot=T, dpsi_calib = dpsi_calib,
+              stomatal_model = stomatal_model_now, Species_now = species)
     
     if(stomatal_model_now %in% par_scheme){
       res_accl <- tibble(x,
                          acclimation = TRUE,
-                         K.scale=K_sperry_acclimate$K_sperry,
+                         K.scale=x_accl[1],
                          psi50= -data1$P50 %>% unique(),
                          b_used = data1$b_alt %>% unique(),
-                         alpha=0.1,
-                         gamma=x_accl[1])
+                         alpha=0.1,#x_accl[4],
+                         gamma=x_accl[2],
+                         convergence = convergence_accl)
     }else{
       res_accl <- tibble(x,
                          acclimation = TRUE,
                          K.scale=x_accl[1],
                          psi50= -data1$P50 %>% unique(),
                          b_used = data1$b_alt %>% unique(),
-                         alpha=0.1,
-                         gamma=NA)
+                         alpha=0.1,#x_accl[4],
+                         gamma=NA,
+                         convergence = convergence_accl)
       }
 
 
   df <- bind_rows(res_accl,res_no_accl)
   
-  readr::write_csv(df,file=paste0("DATA/parameters_torre_marimon/",stomatal_model_now,"_",species,"_",dpsi_calib_now,".csv"))
+  readr::write_csv(df,file=paste0("DATA/parameters_torre_marimon/",stomatal_model_now,"_",species,"_",dpsi_calib,".csv"))
   
   return(bind_rows(res_accl,res_no_accl))
 
 }
 
 ##### COMPUTE PARAMETERS #####
-#First compute sperry model to obtain Kmax for CMAX. CGAIN, WUE and PHYDRO models
-# dat %>% filter(scheme == "phydro_sperry") %>% 
-#   group_split(scheme, dpsi_calib, Species) %>% 
-#   purrr::map_df(get_parameters)->res
-# 
-# save(res,file = "DATA/K_sperry_torre_marimon.RData")
-K_sperry <- NULL
-load(file = "DATA/K_sperry_torre_marimon.RData")
-
-K_sperry <- res %>% 
-  select(Species,K_sperry = K.scale,dpsi_calib,acclimation) %>% 
-  group_by(Species,dpsi_calib, acclimation) %>% 
-  summarise_all(unique)
-
-#Compute the rest of the models
-dat %>% filter(!scheme %in% c("phydro","phydro_sperry")) %>% 
-  group_split(scheme, dpsi_calib, Species) %>% 
+dat %>% filter(scheme != "phydro") %>% group_split(scheme, dpsi_calib, Species) %>% 
   purrr::map_df(get_parameters)->res
+
+View(res)

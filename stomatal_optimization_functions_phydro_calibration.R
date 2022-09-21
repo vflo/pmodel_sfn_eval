@@ -7,7 +7,13 @@ fn_profit <- function(par, psi_soil, par_cost, e_crit, p_crit, par_photosynth,
   dpsi = par[2]#      # delta Psi in MPa
   psi_leaf = psi_soil-dpsi #MPa
   
+  # if(stomatal_model %in% c("phydro","phydro_wang","phydro_wang_mod", "phydro_sperry")){
   gs = calc_gs_phydro(dpsi, psi_soil, par_plant, par_env)+1e-270   # gs in mol/m2ground/s
+  # }else{
+  #   K = scale_conductivity(par_plant$conductivity, par_env) #mol m-2 (leaf) s-1 MPa-1
+  #   D = (par_env$vpd/par_env$patm)
+  #   gs = K/1.6/D * dpsi #mol m-2 (leaf) s-1
+  # }
   e  = 1.6*gs*(par_env$vpd/par_env$patm)         # E in mol/m2ground/s
   
   ## light-limited assimilation
@@ -37,7 +43,7 @@ fn_profit <- function(par, psi_soil, par_cost, e_crit, p_crit, par_photosynth,
   ## wang modificated
   if(stomatal_model == "phydro_wang_mod"){
     cost = (par_cost$alpha*jmax) #umolco2 umolh2o m-2 s-1
-    e_e_crit = -integral_P_e_ecrit(dpsi, psi_soil, par_plant$psi50,par_plant$b)
+    e_e_crit = -integral_P_e_ecrit(dpsi, psi_soil, par_plant$psi50,par_plant$b) #Calculate e over e_crit
     if(is.na(e_e_crit)){e_e_crit = 1}
     out_e = a * e_e_crit
     out = exp(a - out_e - cost)
