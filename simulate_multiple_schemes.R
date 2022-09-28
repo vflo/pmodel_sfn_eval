@@ -17,24 +17,25 @@ source('hydraulic_functions.R')
 source('photosynthetic_functions.R')
 source("QUADP.R")
 
-dat = read.csv(file="DATA/drying_experiments_meta-analysis_Joshi_et_al_2022.csv")
+#LOAD DATA
+dat <-  read.csv(file="DATA/drying_experiments_meta-analysis_extended.csv")
 names = colnames(dat)
 # [4] "Predawn.LWP..MPa."                                 
 # [5] "A..umol.m.2.s.1."                                  
-# [6] "gC..mol.m.2.s.1."                                  
-# [7] "ca..ppm."                                          
-# [8] "D..unitless...Pa...Pa.atm.."                       
-# [9] "T..deg.C."                                                          
-names[4:9] = c("LWP", "A", "gC", "ca", "D", "T")
-names[13] = "Iabs_growth"
-names[12] = "Iabs_used"
+# [6] "gC..mol.m.2.s.1."
+# [7] "vcmax_obs"
+# [8] "jmax_obs"
+# [9] "ca..ppm."                                          
+# [10] "D..unitless...Pa...Pa.atm.."                       
+# [11] "T..deg.C."                                                          
+names[4:11] = c("LWP", "A", "gC", "vcmax_obs","jmax_obs","ca", "D", "T")
+names[15] = "Iabs_growth"
+names[14] = "Iabs_used"
 colnames(dat) = names
 
-dpsi_df = read.csv(file = "DATA/drying_experiments_dpsi_Joshi_et_al_2022.csv")
-# par_data = read.csv("DATA/fitted_params_Joshi_et_al_2022.csv") 
-# par_data_new = read.csv("DATA/fitted_params_flo_acclimated.csv") 
+dpsi_df = read.csv(file = "DATA/drying_experiments_dpsi_extended.csv")
+
 # template = read.csv("DATA/fitted_params_template.csv")
-# template <- template[-c(1:160),]
 # path_par <- "DATA/parameters/"
 path_par <- "DATA/parameter_kmax/"
 par_data <- list.files(path_par) %>% 
@@ -63,10 +64,10 @@ fun_no_accl = function(data, dpsi_calib=T,  k=7,
     cat("inst resp\n")
     ndays = mean(data$Drydown.days)
     psi_crit = par_plant_now$psi50 * (log(1000)/log(2)) ^ ( 1/par_plant_now$b)
-    if(min(data$LWP)<psi_crit){
+    if(min(data$LWP,na.rm = TRUE)<psi_crit){
       psi_min = psi_crit
     }else{
-      psi_min = min(data$LWP) #-6
+      psi_min = min(data$LWP,na.rm = TRUE) #-6
     }
     psi_max = 0 #max(data$LWP)
     # cat(ndays,"\n")
@@ -124,10 +125,10 @@ fun_no_accl = function(data, dpsi_calib=T,  k=7,
         mutate(var = case_when(var>0~0,
                                TRUE~var),
                p = purrr::pmap(list(var, jmax_a, vcmax_a), 
-                               ~model_numerical_instantaneous(tc = mean(data$T), 
-                                                              ppfd = mean(data$Iabs_used), 
-                                                              vpd = mean(data$D*101325), 
-                                                              co2 = mean(data$ca), elv = 0, 
+                               ~model_numerical_instantaneous(tc = mean(data$T,na.rm = TRUE), 
+                                                              ppfd = mean(data$Iabs_used,na.rm = TRUE), 
+                                                              vpd = mean(data$D*101325,na.rm = TRUE), 
+                                                              co2 = mean(data$ca,na.rm = TRUE), elv = 0, 
                                                               fapar = .99, kphio = 0.087, 
                                                               psi_soil = ..1, rdark = 0.02, 
                                                               par_plant = par_plant_now, 
@@ -213,7 +214,7 @@ fun_accl = function(data, dpsi_calib=T, inst=F, k=7,
 
     if (inst == F){
       cat("Acc resp\n")
-      lwp = seq(min(data$LWP), 0, length.out=20)
+      lwp = seq(min(data$LWP,na.rm = TRUE), 0, length.out=20)
       # if(stomatal_model == "phydro"){
       #   dat1 = tibble(var = lwp) %>%
       #     mutate(var = case_when(var>0~0,
@@ -232,10 +233,10 @@ fun_accl = function(data, dpsi_calib=T, inst=F, k=7,
           mutate(var = case_when(var>0~0,
                                  TRUE~var),
                  p = purrr::map(var,
-                                ~model_numerical(tc = mean(data$T), 
-                                                 ppfd = mean(data$Iabs_growth), 
-                                                 vpd = mean(data$D*101325), 
-                                                 co2 = mean(data$ca), elv = 0,
+                                ~model_numerical(tc = mean(data$T,na.rm = TRUE), 
+                                                 ppfd = mean(data$Iabs_growth,na.rm = TRUE), 
+                                                 vpd = mean(data$D*101325,na.rm = TRUE), 
+                                                 co2 = mean(data$ca,na.rm = TRUE), elv = 0,
                                                  fapar = .99, kphio = 0.087, psi_soil = ., 
                                                  rdark = 0.02, par_plant=par_plant_now, 
                                                  par_cost = par_cost_now,
@@ -246,10 +247,10 @@ fun_accl = function(data, dpsi_calib=T, inst=F, k=7,
       cat("inst resp\n")
       ndays = mean(data$Drydown.days)
       psi_crit = par_plant_now$psi50 * (log(1000)/log(2)) ^ ( 1/par_plant_now$b)
-      if(min(data$LWP)<psi_crit){
+      if(min(data$LWP,na.rm = TRUE)<psi_crit){
         psi_min = psi_crit
       }else{
-        psi_min = min(data$LWP) #-6
+        psi_min = min(data$LWP,na.rm = TRUE) #-6
       }
       psi_max = 0 #max(data$LWP)
       # cat(ndays,"\n")
@@ -292,18 +293,20 @@ fun_accl = function(data, dpsi_calib=T, inst=F, k=7,
         dat_acc = tibble(var = spl(day)) %>% 
           mutate(var = case_when(var>0~0,
                                  TRUE~var),
-                 pmod = map(var, ~model_numerical(tc = mean(data$T), ppfd = mean(data$Iabs_growth), 
-                                                  vpd = mean(data$D*101325), co2 = mean(data$ca), 
+                 pmod = map(var, ~model_numerical(tc = mean(data$T,na.rm = TRUE), 
+                                                  ppfd = mean(data$Iabs_growth,na.rm = TRUE), 
+                                                  vpd = mean(data$D*101325,na.rm = TRUE), 
+                                                  co2 = mean(data$ca,na.rm = TRUE), 
                                                   elv = 0, fapar = .99, kphio = 0.087, 
                                                   psi_soil = ., rdark = 0.02, par_plant=par_plant_now, 
                                                   par_cost = par_cost_now, stomatal_model = stomatal_model))) %>% 
           unnest_wider(pmod)
         dat1 = tibble(var = lwp, jmax_a=dat_acc$jmax, vcmax_a=dat_acc$vcmax) %>%
           mutate(p = purrr::pmap(list(var, jmax_a, vcmax_a), 
-                                 ~model_numerical_instantaneous(tc = mean(data$T), 
-                                                                ppfd = mean(data$Iabs_used), 
-                                                                vpd = mean(data$D*101325), 
-                                                                co2 = mean(data$ca), elv = 0, 
+                                 ~model_numerical_instantaneous(tc = mean(data$T,na.rm = TRUE), 
+                                                                ppfd = mean(data$Iabs_used,na.rm = TRUE), 
+                                                                vpd = mean(data$D*101325,na.rm = TRUE), 
+                                                                co2 = mean(data$ca,na.rm = TRUE), elv = 0, 
                                                                 fapar = .99, kphio = 0.087, 
                                                                 psi_soil = ..1, rdark = 0.02, 
                                                                 par_plant=par_plant_now, 
@@ -423,7 +426,7 @@ get_simulations <- function(x){
   )
 
   data_ww <- data1 %>% 
-    mutate(LWP_q90 = quantile(LWP, 0.9),
+    mutate(LWP_q90 = quantile(LWP, 0.9,na.rm=TRUE),
            ci = ca-A/gC) %>% 
     filter(LWP>=LWP_q90) %>% 
     dplyr::select(LWP,A,gC,T,ci,Iabs_growth) %>% 
@@ -474,7 +477,7 @@ get_simulations <- function(x){
 #            ))
 
 df <- par_data %>%
-  filter(!scheme %in% c("phydro_sox","phydro_wang")) %>%
+  # filter(!scheme %in% c("phydro_sox","phydro_wang")) %>%
   # filter(scheme %in% c("phydro_cgain")) %>%
   # rbind(par_data_extra) %>%
   group_split(Species,scheme,dpsi) %>%
