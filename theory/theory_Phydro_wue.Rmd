@@ -87,7 +87,7 @@ fn_profit_phydro_wue_psi_soil <- function(par, par_cost, par_photosynth, par_pla
   vcmax = calc_vcmax_coordinated_numerical(a,ci, par_photosynth)
   
   cost = (par_cost$alpha*jmax) #umolco2 umolh2o m-2 s-1
-  risk = par_cost$gamma*e
+  risk = par_cost$gamma*e*1e3
   out <- tibble(risk = risk,
                 cost = cost,
                 out= a-risk-cost,
@@ -106,7 +106,7 @@ fn_profit_phydro_wue <- function(par, psi_soil, par_cost, par_photosynth, par_pl
   dpsi = par[2]$dpsi       # delta Psi in MPa
   K = scale_conductivity_ks(par_plant$conductivity, par_env, par_plant, do_backtransform = FALSE)
   gs = calc_gs_test(dpsi, psi_soil, par_plant, par_env) * par_env$LAI  # gs in mol/m2ground/s
-  e  = 1.6*gs*(par_env$vpd/par_env$patm)         # E in mol/m2ground/s
+  e  = 1.6*gs*(par_env$vpd/par_env$patm)*1e3         # E in mol/m2ground/s
 
   
   ## light-limited assimilation
@@ -371,7 +371,7 @@ fn_profit_phydro_test <- function(par, psi_soil, par_cost, p_crit, e_crit,
 
 par_cost = list(
   alpha = 0.11,     # cost of jmax
-  gamma = 100
+  gamma = 0.1
   )
 
 p = rpmodel::calc_patm(0)
@@ -475,12 +475,12 @@ $$
 
 par_plant = list(
     conductivity = 1e-16,
-    psi50 = -1.46,
-    b=1.4
+    psi50 = -2,
+    b=1
   )
 par_cost = list(
-  alpha = 0.11,     # cost of jmax
-  gamma = 120
+  alpha = 0.1,     # cost of jmax
+  gamma = 0.5
   )
 jmax <- log(c(10,20,30))
 # jmax <- 4
@@ -607,9 +607,14 @@ ggarrange(plot1,plot2,ncol = 1, nrow = 2, align="hv")
 
 par_plant = list(
     conductivity = 1e-16,
-    psi50 = -1.46,
-    b=1.2
+    psi50 = -2,
+    b=2
   )
+par_cost = list(
+  alpha = 0.1,     # cost of jmax
+  gamma = 0.5
+  )
+
 jmax <- seq(-10,3.5,0.5)
 pl <- seq(0.01,1.5,0.01)
 psi_soil <- seq(0,-8,-1)

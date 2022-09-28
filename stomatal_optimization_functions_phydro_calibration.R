@@ -52,7 +52,7 @@ fn_profit <- function(par, psi_soil, par_cost, e_crit, p_crit, par_photosynth,
   # Least-cost
   if(stomatal_model == "phydro_least_cost"){
     cost = (par_cost$alpha*jmax) #umolco2 umolh2o m-2 s-1
-    out = exp((a-cost)/(par_cost$gamma*e+jmax))
+    out = exp((a-cost)/(par_cost$gamma*e*1e3+vcmax))
   }
   
   #CGain
@@ -65,7 +65,7 @@ fn_profit <- function(par, psi_soil, par_cost, e_crit, p_crit, par_photosynth,
 
   # WUE
   if(stomatal_model == "phydro_wue"){
-    out = exp(a - par_cost$alpha*jmax - par_cost$gamma*e)
+    out = exp(a - par_cost$alpha*jmax - par_cost$gamma*e*1e3)
   }
 
   ## cmax
@@ -73,7 +73,7 @@ fn_profit <- function(par, psi_soil, par_cost, e_crit, p_crit, par_photosynth,
     aa         = par_cost$gamma
     bb         = 1
     p = psi_leaf
-    out <- exp((a - aa*p**2.0 - bb*p) - (par_cost$alpha * jmax))
+    out <- ((a - aa*p^2 - bb*p) - (par_cost$alpha * jmax))
   }
   
   ## sperry
@@ -157,7 +157,7 @@ fn_profit_inst_schemes <- function(par, jmax, vcmax, psi_soil, e_crit, p_crit, p
   
   ## Least-cost #Doesn't work because of jmax in A and as cost.
   if(stomatal_model == "phydro_least_cost"){
-    profit = exp(A/(par_cost$gamma*e+jmax))
+    profit = exp(A/(par_cost$gamma*e*1e3+vcmax))
   }
   
   ## CGain
@@ -169,7 +169,7 @@ fn_profit_inst_schemes <- function(par, jmax, vcmax, psi_soil, e_crit, p_crit, p
   
   ## WUE
   if(stomatal_model == "phydro_wue"){
-    profit = exp(A - (par_cost$gamma*e))
+    profit = exp(A - (par_cost$gamma*e*1e3))
   }
 
   ## cmax
@@ -177,7 +177,7 @@ fn_profit_inst_schemes <- function(par, jmax, vcmax, psi_soil, e_crit, p_crit, p
     aa         = par_cost$gamma
     bb         = 1
     p = psi_leaf
-    profit <- exp(A - aa*p**2.0 - bb*p)
+    profit <- (A - aa*p^2 - bb*p)
   }
   
   ## sperry
@@ -233,12 +233,13 @@ optimise_stomata_phydro_schemes <- function(fn_profit, psi_soil, par_cost, e_cri
   
   jmax_ini = 0
   dpsi_ini = 1
-  continue = TRUE
-  while(continue){
+  # count = 0
+  # continue = TRUE
+  # while(continue){
   out_optim <- optimr::optimr(
     par       = c(logjmax=jmax_ini, dpsi=dpsi_ini),  
     lower     = c(-10, .000001),
-    upper     = c(jmax_lim, 10),
+    upper     = c(jmax_lim, 20),
     fn             = fn_profit,
     psi_soil       = psi_soil,
     e_crit         = e_crit,
@@ -252,16 +253,20 @@ optimise_stomata_phydro_schemes <- function(fn_profit, psi_soil, par_cost, e_cri
     method         = "L-BFGS-B",
     control        = list(maxit = 500, maximize = TRUE, fnscale = 1e2)
   )
-  
-  dpsi_prov <- out_optim$par[2]
-  gs = calc_gs_phydro(dpsi_prov, psi_soil, par_plant, par_env)  # gs in mol_co2/m2/s/Mpa
-  e  = 1.6*gs*(par_env$vpd/par_env$patm) 
-  if(all(e>=e_crit, (psi_soil-dpsi_prov)>=p_crit)){continue = FALSE
-  }else{
-    dpsi_ini = dpsi_ini/10
-  }
-  if(dpsi_ini < 0.000001){continue = FALSE}
-}
+#   
+#   dpsi_prov <- out_optim$par[2]
+#   gs = calc_gs_phydro(dpsi_prov, psi_soil, par_plant, par_env)  # gs in mol_co2/m2/s/Mpa
+#   e  = 1.6*gs*(par_env$vpd/par_env$patm) 
+#   count <- count + 1 
+#   if(all(#(psi_soil-dpsi_prov)>=p_crit, 
+#          dpsi_ini != dpsi_prov)){
+#     continue = FALSE
+#   }else{
+#     dpsi_ini = dpsi_ini*runif(1,0.1,10) 
+#     if(dpsi_ini >= 20){dpsi_ini <- 19.99}
+#   }
+#   if(count > 20){continue = FALSE}
+# }
   out_optim$value <- -out_optim$value
   
   if (return_all){
@@ -280,12 +285,13 @@ optimise_shortterm_schemes <- function(fn_profit_inst, jmax, vcmax, psi_soil, e_
                                stomatal_model, return_all = FALSE, do_optim){
   
   dpsi_ini = 1
-  continue = TRUE
-  while(continue){
+  # count = 0
+  # continue = TRUE
+  # while(continue){
   out_optim <- optimr::optimr(
     par       = c(dpsi=dpsi_ini),  
     lower     = c(.000001),
-    upper     = c(10),
+    upper     = c(20),
     fn        = fn_profit_inst,
     psi_soil  = psi_soil,
     jmax      = jmax,
@@ -302,12 +308,19 @@ optimise_shortterm_schemes <- function(fn_profit_inst, jmax, vcmax, psi_soil, e_
     control   = list(maxit = 500, maximize = TRUE) 
   )
   
-  dpsi_prov <- out_optim$par[1]
-  gs = calc_gs_phydro(dpsi_prov, psi_soil, par_plant, par_env)  # gs in mol_co2/m2/s/Mpa
-  e  = 1.6*gs*(par_env$vpd/par_env$patm) 
-  if(all(e>=e_crit, (psi_soil-dpsi_prov)>=p_crit)){continue = FALSE}else{dpsi_ini = dpsi_ini/10}
-  if(dpsi_ini < 0.000001){continue = FALSE}
-  }
+  # dpsi_prov <- out_optim$par[1]
+  # gs = calc_gs_phydro(dpsi_prov, psi_soil, par_plant, par_env)  # gs in mol_co2/m2/s/Mpa
+  # e  = 1.6*gs*(par_env$vpd/par_env$patm) 
+  # count <- count + 1 
+  # if(all(#(psi_soil-dpsi_prov)>=p_crit,
+  #        dpsi_ini != dpsi_prov)){
+  #   continue = FALSE
+  # }else{
+  #   dpsi_ini = dpsi_ini*runif(1,0.1,10) 
+  #   if(dpsi_ini >= 20){dpsi_ini <- 19.99}
+  # }
+  # if(count > 20){continue = FALSE}
+  # }
   
   out_optim$value <- -out_optim$value
   

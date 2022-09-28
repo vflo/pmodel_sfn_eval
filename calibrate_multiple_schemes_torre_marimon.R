@@ -305,8 +305,8 @@ error_fun_no_accl = function(x, data, plot=F, scale = 1,
   
     p_crit = par_plant_now$psi50 * (log(1000)/log(2)) ^ ( 1/par_plant_now$b)
     ndays = mean(data$Drydown.days)
-    psi_min = min(data$LWP)# -6
-    # psi_min = p_crit
+    # psi_min = min(data$LWP)# -6
+    psi_min = p_crit
     psi_max = 0 #max(data$LWP)
     # cat(ndays,"\n")
     
@@ -420,8 +420,8 @@ error_fun = function(x, data,  plot=F, scale = 1,
   }
       p_crit = par_plant_now$psi50 * (log(1000)/log(2)) ^ ( 1/par_plant_now$b)
       ndays = mean(data$Drydown.days)
-      psi_min = min(data$LWP)# -6
-      # psi_min = p_crit
+      # psi_min = min(data$LWP)# -6
+      psi_min = p_crit
       psi_max = 0 #max(data$LWP)
       # cat(ndays,"\n")
       
@@ -565,20 +565,41 @@ get_parameters <- function(x){
       jmax = foo$jmax
       vcmax = foo$vcmax} 
 
-      print(stomatal_model_now)
-      print(species)
-      optimise(error_fun_no_accl,
-               interval = c(0,1e2),
-               data=data1,
-               dpsi_calib = dpsi_calib_now,
-               stomatal_model = stomatal_model_now,
-               vcmax = vcmax,
-               jmax = jmax, 
-               Species = species,
-               K_sperry = K_sperry_no_acclimate
+    print(stomatal_model_now)
+    print(species)
+    parameter_max <- 50
+    if(stomatal_model_now == "phydro_wue"){
+      parameter_max <- 10
+      GenSA::GenSA(par = c(1),
+                   fn = error_fun_no_accl,
+                   lower = c(0),
+                   upper = parameter_max,
+                   data=data1,
+                   dpsi_calib = dpsi_calib_now,
+                   stomatal_model = stomatal_model_now,
+                   vcmax = vcmax,
+                   jmax = jmax,
+                   Species = species,
+                   K_sperry = K_sperry_no_acclimate,
+                   control = list(maxit = 1000)
       ) -> opt_no_accl
+      x_no_accl <- opt_no_accl$par[1]
+      }
+    else{
+        optimise(error_fun_no_accl,
+                 interval = c(0,parameter_max),
+                 data=data1,
+                 dpsi_calib = dpsi_calib_now,
+                 stomatal_model = stomatal_model_now,
+                 vcmax = vcmax,
+                 jmax = jmax, 
+                 Species = species,
+                 K_sperry = K_sperry_no_acclimate
+        ) -> opt_no_accl
+      x_no_accl <- opt_no_accl$minimum
+     }
 
-    x_no_accl <- opt_no_accl$minimum
+
     
     error_fun_no_accl(x_no_accl, data1, plot=T, dpsi_calib = dpsi_calib_now,
                       stomatal_model = stomatal_model_now, ,
@@ -614,19 +635,36 @@ get_parameters <- function(x){
 
 
 ##### PARAMETERIZATION WITH ACCLIMATION #####
-
-      print(stomatal_model_now)
-      print(species)
+    print(stomatal_model_now)
+    print(species)
+    parameter_max <- 50
+    if(stomatal_model_now == "phydro_wue"){
+      parameter_max <- 10
+      GenSA::GenSA(par = c(1),
+                   fn= error_fun,
+                   lower = c(0),
+                   upper = parameter_max,
+                   data=data1 ,
+                   dpsi_calib = dpsi_calib_now,
+                   stomatal_model = stomatal_model_now,
+                   Species_now = species,
+                   K_sperry = K_sperry_acclimate,
+                   control = list(maxit = 1000)
+      ) -> opt_accl
+      x_accl <- opt_accl$par[1]
+      }
+    else{
       optimise(error_fun,
-               interval = c(0,1e2),
+               interval = c(0,parameter_max),
                data=data1 ,
                dpsi_calib = dpsi_calib_now,
                stomatal_model = stomatal_model_now, 
                Species_now = species,
                K_sperry = K_sperry_acclimate
                      ) -> opt_accl
-
-    x_accl <- opt_accl$minimum
+      x_accl <- opt_accl$minimum
+    }
+    
     
     error_fun(x_accl, data1,
               plot=T, dpsi_calib = dpsi_calib_now,
@@ -662,12 +700,13 @@ get_parameters <- function(x){
 
 ##### COMPUTE PARAMETERS #####
 #First compute sperry model to obtain Kmax for CMAX. CGAIN, WUE and PHYDRO models
-# dat %>% filter(scheme == "phydro_sperry") %>% 
-#   group_split(scheme, dpsi_calib, Species) %>% 
+# K_sperry <- NULL
+# dat %>% filter(scheme == "phydro_sperry") %>%
+#   group_split(scheme, dpsi_calib, Species) %>%
 #   purrr::map_df(get_parameters)->res
 # 
 # save(res,file = "DATA/K_sperry_torre_marimon.RData")
-K_sperry <- NULL
+
 load(file = "DATA/K_sperry_torre_marimon.RData")
 
 K_sperry <- res %>% 
@@ -676,6 +715,12 @@ K_sperry <- res %>%
   summarise_all(unique)
 
 #Compute the rest of the models
-dat %>% filter(!scheme %in% c("phydro","phydro_sperry")) %>% 
+dat %>% filter(!scheme %in% c("phydro_sperry","phydro",
+                              "phydro_cgain", "phydro_cmax",
+                              "phydro_wang","phydro_wang_mod",
+                              "phydro_sox","phydro_sox_mod"),
+               dpsi_calib == "FALSE" & Species %in% c("Acer campestre","Arbutus unedo",
+                                                      "Myrtus communis", "Phillyrea latifolia", 
+                                                      "Pinus halepensis", "Pinus sylvestris")) %>% 
   group_split(scheme, dpsi_calib, Species) %>% 
-  purrr::map_df(get_parameters)->res
+  purrr::map_df(get_parameters)
