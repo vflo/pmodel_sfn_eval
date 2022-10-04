@@ -164,22 +164,26 @@ fun_no_accl = function(data, dpsi_calib=T,  k=7,
   g_pred = g_spl(data_f$LWP)
   c_pred = c_spl(data_f$LWP)
   
+  #DPSI
+  # if(dpsi_calib){
+  d_spl = splinefun(lwp, y=dat1$dpsi)
+  d_pred = d_spl(dpsi_data$SWP)
+  d_pred2 = d_spl(data_f$LWP)
+  
+  # }else{
+  #   d_pred = NA
+  # }
+  
   data_f <- data_f %>% 
     cbind(a_pred = a_pred,
           g_pred = g_pred,
           c_pred = c_pred,
+          d_pred = d_pred2,
           psi88S = psi88S,
           psiL88S = psiL88S,
           dp88S = dp88S,
           gs0 = gs0) 
   
-  #DPSI
-  # if (dpsi_calib){
-    d_spl = splinefun(lwp, y=dat1$dpsi)
-    d_pred = d_spl(dpsi_data$SWP)
-  # }else{
-  #   d_pred = NA
-  # }
   dpsi_data_f <- dpsi_data %>% 
     dplyr::select(Species,DAY,MDWP,SWP,Dpsi) %>%
     dplyr::rename(LWP = SWP) %>% 
@@ -341,23 +345,28 @@ fun_accl = function(data, dpsi_calib=T, inst=F, k=7,
     g_pred = g_spl(data_f$LWP)
     c_pred = c_spl(data_f$LWP)
     
-    data_f <- data_f %>% 
-      cbind(a_pred = a_pred,
-            g_pred = g_pred,
-            c_pred = c_pred,
-            psi88S = psi88S,
-            psiL88S = psiL88S,
-            dp88S = dp88S,
-            gs0 = gs0) 
+
     
     #DPSI
     # if(dpsi_calib){
       d_spl = splinefun(lwp, y=dat1$dpsi)
       d_pred = d_spl(dpsi_data$SWP)
+      d_pred2 = d_spl(data_f$LWP)
+ 
     # }else{
     #   d_pred = NA
     # }
     
+    data_f <- data_f %>% 
+        cbind(a_pred = a_pred,
+              g_pred = g_pred,
+              c_pred = c_pred,
+              d_pred = d_pred2,
+              psi88S = psi88S,
+              psiL88S = psiL88S,
+              dp88S = dp88S,
+              gs0 = gs0) 
+      
     dpsi_data_f <- dpsi_data %>% 
       dplyr::select(Species,DAY,MDWP,SWP,Dpsi) %>%
       dplyr::rename(LWP = SWP) %>% 

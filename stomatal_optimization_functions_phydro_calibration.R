@@ -1,10 +1,12 @@
 ###########################################
 ## ACCLIMATION OPTIMIZATION SCHEMES
 ###########################################
+library("optimParallel")
+cl <- makeCluster(detectCores()); setDefaultCluster(cl = cl)
 fn_profit <- function(par, psi_soil, par_cost, e_crit, p_crit, par_photosynth, 
                       par_plant, par_env, do_optim = FALSE, stomatal_model){
   jmax = exp(par[1])  # Jmax in umol/m2/s (logjmax is supplied by the optimizer)
-  dpsi = par[2]#      # delta Psi in MPa
+  dpsi = exp(par[2])#      # delta Psi in MPa
   psi_leaf = psi_soil-dpsi #MPa
   
   # if(stomatal_model %in% c("phydro","phydro_wang","phydro_wang_mod", "phydro_sperry")){
@@ -59,7 +61,6 @@ fn_profit <- function(par, psi_soil, par_cost, e_crit, p_crit, par_photosynth,
   if(stomatal_model == "phydro_cgain"){
     K      = scale_conductivity(par_plant$conductivity, par_env)  #mol m-2 (ground) s-1 MPa-1
     kl     = K*(1/2)^((psi_leaf/par_plant$psi50)^par_plant$b)
-    ks     = K*(1/2)^((psi_soil/par_plant$psi50)^par_plant$b)
     out = exp(a - par_cost$alpha*jmax - par_cost$gamma*(K-kl)/K)
   }
 
@@ -126,13 +127,14 @@ fn_profit <- function(par, psi_soil, par_cost, e_crit, p_crit, par_photosynth,
 fn_profit_inst_schemes <- function(par, jmax, vcmax, psi_soil, e_crit, p_crit, par_cost, 
                                    par_photosynth, par_plant, par_env, 
                                    stomatal_model, do_optim){
-  dpsi = par[1]#      # delta Psi in MPa
+  dpsi = exp(par[1])#      # delta Psi in MPa
   psi_leaf = psi_soil-dpsi #MPa
 
   gs = calc_gs_phydro(dpsi, psi_soil, par_plant, par_env)+1e-270  # gs in mol_co2/m2/s/Mpa
   e  = 1.6*gs*(par_env$vpd/par_env$patm)         # E in mol_h2o/m2_ground/s
   A = calc_assimilation_limiting(vcmax, jmax, gs, par_photosynth)$a
-
+  # A = calc_assim_light_limited(gs, jmax, par_photosynth)$a
+  
   ## phydro
   if(stomatal_model == "phydro"){
     profit = A - par_cost$gamma * dpsi^2 
@@ -164,7 +166,7 @@ fn_profit_inst_schemes <- function(par, jmax, vcmax, psi_soil, e_crit, p_crit, p
   if(stomatal_model == "phydro_cgain"){
     K      = scale_conductivity(par_plant$conductivity, par_env)  #mol m-2 (ground) s-1 MPa-1
     kl     = K*(1/2)^((psi_leaf/par_plant$psi50)^par_plant$b)
-    profit = exp(A - par_cost$gamma*(K-kl)/K)
+    profit = exp(A - par_cost$alpha*jmax - par_cost$gamma*(K-kl)/K)
   }
   
   ## WUE
@@ -231,14 +233,21 @@ optimise_stomata_phydro_schemes <- function(fn_profit, psi_soil, par_cost, e_cri
                                             par_plant, par_env, jmax_lim, return_all = FALSE, do_optim=TRUE, stomatal_model){
   if(is.null(jmax_lim)){jmax_lim = 7}
   
-  jmax_ini = 0
-  dpsi_ini = 1
+  # jmax_ini = c(0,0,0,0,0,0,0,0,0)
+  # dpsi_ini = c(0,0.1,0.5,-0.5,-1,-2,-3,-4,-5)
+  jmax_ini = c(0)
+  dpsi_ini = c(0)
+  # dpsi_ini = c(0)+psi_soil
+  # lower <- c(-Inf, -Inf)
+  lower <- c(-10, -10)
   # count = 0
   # continue = TRUE
   # while(continue){
   out_optim <- optimr::optimr(
-    par       = c(logjmax=jmax_ini, dpsi=dpsi_ini),  
-    lower     = c(-10, .000001),
+  # out_optim <- optimParallel::optimParallel(
+    # par       = matrix(c(jmax_ini, dpsi_ini),ncol=2),  
+    par       = c(jmax_ini, dpsi_ini), 
+    lower     = lower,
     upper     = c(jmax_lim, 20),
     fn             = fn_profit,
     psi_soil       = psi_soil,
@@ -251,7 +260,8 @@ optimise_stomata_phydro_schemes <- function(fn_profit, psi_soil, par_cost, e_cri
     do_optim       = do_optim, 
     stomatal_model = stomatal_model,
     method         = "L-BFGS-B",
-    control        = list(maxit = 500, maximize = TRUE, fnscale = 1e2)
+    control        = list(maxit = 500, maximize = TRUE, fnscale = 1e10,
+                          REPORT=0, trace=0)
   )
 #   
 #   dpsi_prov <- out_optim$par[2]
@@ -267,6 +277,9 @@ optimise_stomata_phydro_schemes <- function(fn_profit, psi_soil, par_cost, e_cri
 #   }
 #   if(count > 20){continue = FALSE}
 # }
+  
+  # out_optim <- out_optim[which(out_optim$value == min(out_optim$value)),]
+  # list(par=c(out_optim$p1,out_optim$p2),value=out_optim[3])
   out_optim$value <- -out_optim$value
   
   if (return_all){
@@ -284,13 +297,17 @@ optimise_shortterm_schemes <- function(fn_profit_inst, jmax, vcmax, psi_soil, e_
                                par_cost, par_photosynth, par_plant, par_env, 
                                stomatal_model, return_all = FALSE, do_optim){
   
-  dpsi_ini = 1
+  # dpsi_ini = c(0,0.1,0.5,-0.5,-1)
+  dpsi_ini = 0
+  # dpsi_ini = c(0)+psi_soil
   # count = 0
   # continue = TRUE
   # while(continue){
+  # out_optim <- optimr::multistart(
   out_optim <- optimr::optimr(
-    par       = c(dpsi=dpsi_ini),  
-    lower     = c(.000001),
+    # par       = matrix(dpsi_ini,ncol=1),  
+    par       = dpsi_ini, 
+    lower     = c(-Inf),
     upper     = c(20),
     fn        = fn_profit_inst,
     psi_soil  = psi_soil,
@@ -305,7 +322,7 @@ optimise_shortterm_schemes <- function(fn_profit_inst, jmax, vcmax, psi_soil, e_
     do_optim  = do_optim, 
     stomatal_model = stomatal_model,
     method    = "L-BFGS-B",
-    control   = list(maxit = 500, maximize = TRUE) 
+    control   = list(maxit = 500, maximize = TRUE, fnscale = 1e1000) 
   )
   
   # dpsi_prov <- out_optim$par[1]
@@ -391,7 +408,7 @@ model_numerical <- function(tc, ppfd, vpd, co2, elv, fapar, kphio, psi_soil,
   
     # 4. Calculate output variables
     jmax  = exp(lj_dps[1]) %>% unname()
-    dpsi  = lj_dps[2] %>% unname()
+    dpsi  = exp(lj_dps[2]) %>% unname()
     psi_l = psi_soil-dpsi
     gs    = calc_gs_phydro(dpsi, psi_soil, par_plant, par_env) # gs in mol m-2 (ground) s-1
     a_j   = calc_assim_light_limited(gs = gs, jmax = jmax, par_photosynth = par_photosynth)
@@ -478,7 +495,7 @@ model_numerical_instantaneous <- function(vcmax, jmax, tc, ppfd, vpd, co2, elv, 
                                       stomatal_model = stomatal_model)
   
   # 4. Calculate output variables
-  dpsi  = lj_dps[1] %>% unname() # delta Psi in MPa
+  dpsi  = exp(lj_dps[1]) %>% unname() # delta Psi in MPa
   psi_l = psi_soil-dpsi  # leaf water potential
   gs    = calc_gs_phydro(dpsi, psi_soil, par_plant, par_env) # gs in mol m-2 (ground) s-1
   a_j   = calc_assim_light_limited(gs = gs, jmax = jmax, par_photosynth = par_photosynth)
