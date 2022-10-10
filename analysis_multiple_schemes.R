@@ -1671,7 +1671,7 @@ p2 <- df_sim_Q_high  %>%
   ylim(0,170)+
   NULL
 
-p2 <- df_sim_Q_actual  %>%
+p3 <- df_sim_Q_actual  %>%
   # rbind(df_sim_Ep) %>% 
   # rbind(df_sim_Epo) %>%
   # filter(a>0.2) %>%
@@ -2093,6 +2093,7 @@ df_sim_jmax %>%
         legend.background = element_rect(fill="transparent"))+
   facet_wrap(~Species)+
   xlim(-7,0)+
+  guides(colour = guide_legend(nrow = 1))+
   NULL
 
 
@@ -2409,4 +2410,25 @@ ggarrange(p1,p2,p3,p4,
 
 
 ################################################################################
-
+library(gridExtra)
+library(grid)
+df_a %>% 
+  ungroup() %>% 
+  filter(acclimation == "Acclimated") %>% 
+  select(Species,scheme,r) %>% 
+  # pivot_wider(values_from = 'r', names_from = 'scheme') %>% 
+  # grid.table(theme = ttheme_minimal(
+  #   core=list(bg_params = list(fill = blues9[1:4], col=NA),
+  #             fg_params=list(fontface=3))))
+ggpubr::ggballoonplot( 
+  # aes(x = scheme, y = Species, fill = r)) +
+  # geom_tile(color = "grey20") +
+  # scale_fill_viridis_b(name = "r Pearson's") +
+  # scale_x_discrete(name = "") +
+  # scale_y_discrete(name = "")+
+  # mytheme2()
+x = "scheme", y = "Species",
+size = "r", fill = "r") +
+  scale_fill_viridis_b(name = "r Pearson's") +
+  guides(size = FALSE)
+    

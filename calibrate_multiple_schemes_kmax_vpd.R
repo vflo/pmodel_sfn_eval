@@ -11,6 +11,7 @@ library(scales)
 library(zoo)
 library(stringr)
 library(rphydro)
+library(DEoptim)
 # library(furrr)
 # plan('multisession', workers = 6)
 # options('future.global.maxsize'=2*1024*1024^2)
@@ -556,26 +557,12 @@ get_parameters <- function(x){
                                         
     print(stomatal_model_now)
     print(species)
-    parameter_max <- 20
-    if(stomatal_model_now %in% c("phydro_wue")){
-      parameter_max <- 10
-      GenSA::GenSA(par = c(1),
-                   fn = error_fun_no_accl,
-                   lower = c(0),
-                   upper = parameter_max,
-                   data=data1,
-                   data_template = data_template_now,
-                   dpsi_calib = dpsi_calib_now,
-                   stomatal_model = stomatal_model_now,
-                   vcmax = vcmax,
-                   jmax = jmax,
-                   Species = species,
-                   K_sperry = K_sperry_no_acclimate,
-                   control = list(maxit = 300)
-      ) -> opt_no_accl
-      x_no_accl <- opt_no_accl$par[1]
-    }
-    else{
+    parameter_max <- 10
+    if(stomatal_model_now %in% c("phydro_cgain")){
+      parameter_max <- 50}
+    if(stomatal_model_now %in% c("phydro_cmax")){
+      parameter_max <- 6}
+
       optimise(error_fun_no_accl,
                interval = c(0,parameter_max),
                data=data1,
@@ -588,9 +575,6 @@ get_parameters <- function(x){
                K_sperry = K_sperry_no_acclimate
       ) -> opt_no_accl
       x_no_accl <- opt_no_accl$minimum
-    }
-    
-    
     
     error_fun_no_accl(x_no_accl, data1, 
                       data_template = data_template_now, plot=T, 
@@ -625,25 +609,12 @@ get_parameters <- function(x){
     ##### PARAMETERIZATION WITH ACCLIMATION #####
     print(stomatal_model_now)
     print(species)
-    parameter_max <- 20
-    if(stomatal_model_now %in% c("phydro_wue")){
-      parameter_max <- 10
-      GenSA::GenSA(par = c(1),
-                   fn= error_fun,
-                   lower = c(0),
-                   upper = parameter_max,
-                   data=data1,
-                   data_template = data_template_now,
-                   dpsi_calib = dpsi_calib_now,
-                   inst = inst,
-                   stomatal_model = stomatal_model_now,
-                   Species_now = species,
-                   K_sperry = K_sperry_acclimate,
-                   control = list(maxit = 300)
-      ) -> opt_accl
-      x_accl <- opt_accl$par[1]
-    }
-    else{
+    parameter_max <- 10
+    if(stomatal_model_now %in% c("phydro_cgain")){
+        parameter_max <- 50}
+    if(stomatal_model_now %in% c("phydro_cmax")){
+      parameter_max <- 6}
+    
       optimise(error_fun,
                interval = c(0,parameter_max),
                data=data1,
@@ -655,9 +626,7 @@ get_parameters <- function(x){
                K_sperry = K_sperry_acclimate
       ) -> opt_accl
       x_accl <- opt_accl$minimum
-    }
-    
-    
+
     error_fun(x_accl, data1, data_template = data_template_now,
               plot=T, dpsi_calib = dpsi_calib_now, inst = inst,
               stomatal_model = stomatal_model_now, Species_now = species,
@@ -688,12 +657,12 @@ get_parameters <- function(x){
 
 ##### COMPUTE PARAMETERS #####
 #First compute sperry model to obtain Kmax for CMAX. CGAIN, WUE and PHYDRO models
-K_sperry <- NULL
-template %>% filter(scheme == "phydro_sperry",dpsi == FALSE) %>%
-  group_split(scheme, dpsi, Species) %>%
-  purrr::map_df(get_parameters)->res
-
-save(res,file = "DATA/K_sperry_meta-analysis_kmax_vpd.RData")
+# K_sperry <- NULL
+# template %>% filter(scheme == "phydro_sperry",dpsi == FALSE) %>%
+#   group_split(scheme, dpsi, Species) %>%
+#   purrr::map_df(get_parameters)->res
+# 
+# save(res,file = "DATA/K_sperry_meta-analysis_kmax_vpd.RData")
 
 load(file = "DATA/K_sperry_meta-analysis_kmax_vpd.RData")
 
@@ -704,10 +673,10 @@ K_sperry <- res %>%
 
 #Compute the rest of the models
 template %>% 
-  filter(!scheme %in% c("phydro_sperry"),
+  filter(!scheme %in% c("phydro_sperry","phydro","phydro_cgain","phydro_cmax"),
          dpsi == FALSE) %>%
   # filter(scheme %in% c("phydro")) %>%
-  # filter(scheme %in% c("phydro_cgain"), Species == "Allocasuarina luehmannii") %>%
+  # filter(scheme %in% c("phydro_cmax"), Species == "Quercus ilex") %>%
   group_split(scheme, dpsi, Species) %>% 
   purrr::map_df(get_parameters)
 

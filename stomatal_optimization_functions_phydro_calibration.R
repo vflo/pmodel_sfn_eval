@@ -1,8 +1,8 @@
 ###########################################
 ## ACCLIMATION OPTIMIZATION SCHEMES
 ###########################################
-library("optimParallel")
-cl <- makeCluster(detectCores()); setDefaultCluster(cl = cl)
+# library("optimParallel")
+# cl <- makeCluster(detectCores()); setDefaultCluster(cl = cl)
 fn_profit <- function(par, psi_soil, par_cost, e_crit, p_crit, par_photosynth, 
                       par_plant, par_env, do_optim = FALSE, stomatal_model){
   jmax = exp(par[1])  # Jmax in umol/m2/s (logjmax is supplied by the optimizer)
@@ -240,52 +240,53 @@ optimise_stomata_phydro_schemes <- function(fn_profit, psi_soil, par_cost, e_cri
   # dpsi_ini = c(0)+psi_soil
   # lower <- c(-Inf, -Inf)
   lower <- c(-10, -10)
-  # count = 0
-  # continue = TRUE
-  # while(continue){
-  out_optim <- optimr::optimr(
-  # out_optim <- optimParallel::optimParallel(
-    # par       = matrix(c(jmax_ini, dpsi_ini),ncol=2),  
-    par       = c(jmax_ini, dpsi_ini), 
-    lower     = lower,
-    upper     = c(jmax_lim, 20),
-    fn             = fn_profit,
-    psi_soil       = psi_soil,
-    e_crit         = e_crit,
-    p_crit         = p_crit,
-    par_cost       = par_cost,
-    par_photosynth = par_photosynth,
-    par_plant      = par_plant,
-    par_env        = par_env,
-    do_optim       = do_optim, 
-    stomatal_model = stomatal_model,
-    method         = "L-BFGS-B",
-    control        = list(maxit = 500, maximize = TRUE, fnscale = 1e10,
-                          REPORT=0, trace=0)
-  )
-#   
-#   dpsi_prov <- out_optim$par[2]
-#   gs = calc_gs_phydro(dpsi_prov, psi_soil, par_plant, par_env)  # gs in mol_co2/m2/s/Mpa
-#   e  = 1.6*gs*(par_env$vpd/par_env$patm) 
-#   count <- count + 1 
-#   if(all(#(psi_soil-dpsi_prov)>=p_crit, 
-#          dpsi_ini != dpsi_prov)){
-#     continue = FALSE
-#   }else{
-#     dpsi_ini = dpsi_ini*runif(1,0.1,10) 
-#     if(dpsi_ini >= 20){dpsi_ini <- 19.99}
-#   }
-#   if(count > 20){continue = FALSE}
-# }
-  
-  # out_optim <- out_optim[which(out_optim$value == min(out_optim$value)),]
-  # list(par=c(out_optim$p1,out_optim$p2),value=out_optim[3])
-  out_optim$value <- -out_optim$value
+  if(!stomatal_model %in% c('phydro_sox_mod','phydro_cmax','phydro_cgain')){
+    out_optim <- optimr::optimr(
+      par       = c(jmax_ini, dpsi_ini),
+      lower     = lower,
+      upper     = c(jmax_lim, 20),
+      fn             = fn_profit,
+      psi_soil       = psi_soil,
+      e_crit         = e_crit,
+      p_crit         = p_crit,
+      par_cost       = par_cost,
+      par_photosynth = par_photosynth,
+      par_plant      = par_plant,
+      par_env        = par_env,
+      do_optim       = do_optim, 
+      stomatal_model = stomatal_model,
+      method         = "L-BFGS-B",
+      control        = list(maxit = 500, maximize = TRUE, fnscale = 1e10,
+                            REPORT=0, trace=0)
+    )
+    out_optim$value <- -out_optim$value
+  }else{
+    out_optim <- DEoptim::DEoptim(
+      lower     = lower,
+      upper     = c(jmax_lim, 20),
+      fn             = fn_profit,
+      psi_soil       = psi_soil,
+      e_crit         = e_crit,
+      p_crit         = p_crit,
+      par_cost       = par_cost,
+      par_photosynth = par_photosynth,
+      par_plant      = par_plant,
+      par_env        = par_env,
+      do_optim       = do_optim, 
+      stomatal_model = stomatal_model,
+      control = DEoptim.control(NP = 30,trace = FALSE,itermax = 200)
+    )
+    }
+
   
   if (return_all){
     out_optim
   } else {
-    return(out_optim$par)
+    if(!stomatal_model %in% c('phydro_sox_mod','phydro_cmax','phydro_cgain')){
+      return(out_optim$par)
+    }else{
+      return(out_optim$optim$bestmem)
+    }
   }
 }
 
@@ -300,51 +301,55 @@ optimise_shortterm_schemes <- function(fn_profit_inst, jmax, vcmax, psi_soil, e_
   # dpsi_ini = c(0,0.1,0.5,-0.5,-1)
   dpsi_ini = 0
   # dpsi_ini = c(0)+psi_soil
-  # count = 0
-  # continue = TRUE
-  # while(continue){
-  # out_optim <- optimr::multistart(
-  out_optim <- optimr::optimr(
-    # par       = matrix(dpsi_ini,ncol=1),  
-    par       = dpsi_ini, 
-    lower     = c(-Inf),
-    upper     = c(20),
-    fn        = fn_profit_inst,
-    psi_soil  = psi_soil,
-    jmax      = jmax,
-    vcmax     = vcmax,
-    e_crit    = e_crit,
-    p_crit    = p_crit,
-    par_cost  = par_cost,
-    par_photosynth = par_photosynth,
-    par_plant = par_plant,
-    par_env   = par_env,
-    do_optim  = do_optim, 
-    stomatal_model = stomatal_model,
-    method    = "L-BFGS-B",
-    control   = list(maxit = 500, maximize = TRUE, fnscale = 1e1000) 
-  )
-  
-  # dpsi_prov <- out_optim$par[1]
-  # gs = calc_gs_phydro(dpsi_prov, psi_soil, par_plant, par_env)  # gs in mol_co2/m2/s/Mpa
-  # e  = 1.6*gs*(par_env$vpd/par_env$patm) 
-  # count <- count + 1 
-  # if(all(#(psi_soil-dpsi_prov)>=p_crit,
-  #        dpsi_ini != dpsi_prov)){
-  #   continue = FALSE
-  # }else{
-  #   dpsi_ini = dpsi_ini*runif(1,0.1,10) 
-  #   if(dpsi_ini >= 20){dpsi_ini <- 19.99}
-  # }
-  # if(count > 20){continue = FALSE}
-  # }
-  
-  out_optim$value <- -out_optim$value
+  if(!stomatal_model %in% c('phydro_sox_mod','phydro_cmax','phydro_cgain')){
+    out_optim <- optimr::optimr(
+      par       = dpsi_ini,
+      lower     = c(-10),
+      upper     = c(20),
+      fn        = fn_profit_inst,
+      psi_soil  = psi_soil,
+      jmax      = jmax,
+      vcmax     = vcmax,
+      e_crit    = e_crit,
+      p_crit    = p_crit,
+      par_cost  = par_cost,
+      par_photosynth = par_photosynth,
+      par_plant = par_plant,
+      par_env   = par_env,
+      do_optim  = do_optim, 
+      stomatal_model = stomatal_model,
+      method    = "L-BFGS-B",
+      control   = list(maxit = 500, maximize = TRUE, fnscale = 1e1000)
+    )
+    out_optim$value <- -out_optim$value
+  }else{
+    out_optim <- DEoptim::DEoptim(
+      lower     = c(-10),
+      upper     = c(20),
+      fn        = fn_profit_inst,
+      psi_soil  = psi_soil,
+      jmax      = jmax,
+      vcmax     = vcmax,
+      e_crit    = e_crit,
+      p_crit    = p_crit,
+      par_cost  = par_cost,
+      par_photosynth = par_photosynth,
+      par_plant = par_plant,
+      par_env   = par_env,
+      do_optim  = do_optim, 
+      stomatal_model = stomatal_model,
+      control = DEoptim.control(NP = 15,trace = FALSE,itermax = 100)
+    )
+  }
   
   if (return_all){
     out_optim
   } else {
-    return(out_optim$par)
+    if(!stomatal_model %in% c('phydro_sox_mod','phydro_cmax','phydro_cgain')){
+      return(out_optim$par)
+    }else{
+        return(out_optim$optim$bestmem)
+      }
   }
 }
 
