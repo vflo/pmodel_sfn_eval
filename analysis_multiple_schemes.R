@@ -58,33 +58,17 @@ col_df <- tibble(scheme = factor(c(#"phydro_wue",
     'CMAX','CGAIN','PHYDRO','PROFITMAX2','SOX','PROFITMAX')),
   col = brewer_pal(palette = "Dark2")(6)
 )
-# load(file = "DATA/simulations_16_09_2022.RData")
-# load(file = "DATA/simulations_kmax.RData")
+
 load(file = "DATA/simulations_kmax_vpd.RData")
 
-# path_par <- "DATA/parameters/"
-# path_par <- "DATA/parameter_kmax/"
 path_par <- "DATA/parameter_kmax_vpd/"
 par_data <- list.files(path_par) %>% 
   purrr::map_df(function(x){
     readr::read_csv(paste0(path_par,x))
   })
 
-# par_data_extra <- par_data %>% 
-#   filter(scheme %in% c("phydro_wue","phydro_cgain"
-#   )) %>% 
-#   filter(Species %in% c( "Allocasuarina luehmannii","Olea europaea var. Meski",
-#                          "Pseudotzuga menziesii","Eucalyptus pilularis","Eucalyptus populnea",
-#                          "Glycine max","Quercus coccifera",
-#                          "Quercus ilex","Quercus suber"
-#   ))
 df_param <- par_data %>% 
-  # filter(dpsi == TRUE & scheme %in% c("phydro")|
-  #          dpsi == FALSE & !scheme %in% c("phydro")) %>%
   filter(dpsi == FALSE) %>%
-  # filter(dpsi == TRUE & !scheme %in% c("phydro_wue","phydro_cgain",'phydro_wang_mod','phydro_sox')|
-  #          dpsi == FALSE & scheme %in% c("phydro_wue","phydro_cgain",'phydro_wang_mod','phydro_sox')) %>%
-  # rbind(par_data_extra) %>%
   mutate(scheme = factor(scheme, 
                          levels = c("phydro_wue","phydro_cmax",
                                     "phydro_cgain", "phydro",
@@ -100,6 +84,34 @@ df_param <- par_data %>%
                         'SOXnet',
                         'WUE'),
          !Species %in% c('Betula pendula','Pinus sylvestris'))
+
+
+path_par_kmax_alpha <- "DATA/parameter_kmax_vpd/"
+par_data_kmax_alpha <- list.files(path_par_kmax_alpha) %>% 
+  purrr::map_df(function(x){
+    readr::read_csv(paste0(path_par_kmax_alpha,x))
+  })
+
+df_param_kmax_alpha <- par_data_kmax_alpha %>% 
+  filter(dpsi == FALSE) %>%
+  mutate(scheme = factor(scheme, 
+                         levels = c("phydro_wue","phydro_cmax",
+                                    "phydro_cgain", "phydro",
+                                    "phydro_wang","phydro_sox",
+                                    "phydro_wang_mod","phydro_sox_mod",
+                                    "phydro_sperry"),
+                         labels = c("WUE",'CMAX','CGAIN','PHYDRO','PROFITMAX2net','SOXnet','PROFITMAX2','SOX','PROFITMAX')) ,
+         acclimation = factor(acclimation, 
+                              levels = c('TRUE','FALSE'),
+                              labels = c("Acclimated", "No acclimated"))
+  )%>% 
+  filter(!scheme %in% c('PROFITMAX2net',
+                        'SOXnet',
+                        'WUE'),
+         !Species %in% c('Betula pendula','Pinus sylvestris'))
+
+
+
 # 
 # df_param %>% 
 #   ggplot(aes(scheme, log(K.scale), color = acclimation))+
@@ -1991,8 +2003,8 @@ df_sim_Q_low %>%
     A1 = a*1e-6,
     A2 = lead(a)*1e-6,
     L = (r2-r1)/(A2-A1),
-    sens_g = abs(0.5*((A1/(rprima1+r1))+(A2/(rprima2+r2)))*L)) %>% 
-  filter(sens_g<=1,gs>=gs0*0.12) %>% 
+    sens_g = -(0.5*((A1/(rprima1+r1))+(A2/(rprima2+r2)))*L)) %>% 
+  filter(sens_g<=1,gs>=gs0*0.12,sens_g>=0) %>% 
   ggplot()+
   geom_line(aes(var,sens_g,color = scheme,group= scheme),size = 1)+
   geom_vline(data=df_summary_sp, aes(xintercept=P50),linetype=3)+
@@ -2432,3 +2444,46 @@ size = "r", fill = "r") +
   scale_fill_viridis_b(name = "r Pearson's") +
   guides(size = FALSE)
     
+
+
+
+
+################################################################################
+
+df %>% 
+  ggplot()+
+  geom_point(aes(gC,A),shape = 1)+
+  geom_smooth(aes(g_pred,a_pred,color=scheme, group=interaction(Species,scheme)),
+              se = FALSE,method="lm",linetype = 2, size=0.5)+
+  geom_smooth(aes(g_pred,a_pred,color=scheme),se = TRUE,method="lm")+
+  facet_wrap(~acclimation)+
+  mytheme2()+
+  scale_colour_manual(breaks = col_df$scheme, 
+                      values = unique(as.character(col_df$col)))+
+  theme(
+    legend.title = element_blank(),
+    legend.position = "top",
+        legend.background = element_rect(fill="transparent"))+
+  ylab(expression(atop("A ("*mu*"mol m"^-2~"s"^-1~")")))+
+  xlab(expression(atop("g"[s]~"(mol m"^-2~"s"^-1*")")))+
+  guides(colour = guide_legend(nrow = 1))+
+  NULL
+
+
+
+df %>% 
+  ggplot(aes(LWP,gC/A,color=Species))+
+  geom_point(shape = 1)+
+  # geom_smooth(aes(g_pred,a_pred,color=scheme, group=interaction(Species,scheme)),
+  #             se = FALSE,method="lm",linetype = 2, size=0.5)+
+  geom_smooth(se = FALSE, method="gam",formula = y ~ s(x, bs = "cs",k=3))+
+  # facet_wrap(~acclimation)+
+  mytheme2()+
+  theme(
+    legend.title = element_blank(),
+    legend.position = "top",
+    legend.background = element_rect(fill="transparent"))+
+  ylab(expression(atop("WUE"[i]~"("*mu*"mol mol"^{-1}*")")))+
+  xlab(expression(psi*" (MPa)"))+
+  guides(colour = guide_legend(nrow = 2))+
+  NULL

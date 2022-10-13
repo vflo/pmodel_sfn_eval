@@ -649,7 +649,7 @@ get_parameters <- function(x){
 
   df <- bind_rows(res_accl,res_no_accl)
   
-  readr::write_csv(df,file=paste0("DATA/parameter_kmax_vpd/",stomatal_model_now,"_",species,"_",dpsi_calib_now,"_",inst,".csv"))
+  readr::write_csv(df,file=paste0("DATA/parameter_kmax_vpd/",stomatal_model_now,"_",species,"_",dpsi_calib_now,"_",x$source,".csv"))
   
   return(bind_rows(res_accl,res_no_accl))
 
@@ -657,12 +657,12 @@ get_parameters <- function(x){
 
 ##### COMPUTE PARAMETERS #####
 #First compute sperry model to obtain Kmax for CMAX. CGAIN, WUE and PHYDRO models
-# K_sperry <- NULL
-# template %>% filter(scheme == "phydro_sperry",dpsi == FALSE) %>%
-#   group_split(scheme, dpsi, Species) %>%
-#   purrr::map_df(get_parameters)->res
-# 
-# save(res,file = "DATA/K_sperry_meta-analysis_kmax_vpd.RData")
+K_sperry <- NULL
+template %>% filter(scheme == "phydro_sperry",dpsi == FALSE) %>%
+  group_split(scheme, dpsi, Species,source) %>%
+  purrr::map_df(get_parameters)->res
+
+save(res,file = "DATA/K_sperry_meta-analysis_kmax_vpd.RData")
 
 load(file = "DATA/K_sperry_meta-analysis_kmax_vpd.RData")
 
@@ -673,11 +673,11 @@ K_sperry <- res %>%
 
 #Compute the rest of the models
 template %>% 
-  filter(!scheme %in% c("phydro_sperry","phydro","phydro_cgain","phydro_cmax"),
+  filter(!scheme %in% c("phydro_sperry"),
          dpsi == FALSE) %>%
   # filter(scheme %in% c("phydro")) %>%
   # filter(scheme %in% c("phydro_cmax"), Species == "Quercus ilex") %>%
-  group_split(scheme, dpsi, Species) %>% 
+  group_split(scheme, dpsi, Species,source) %>% 
   purrr::map_df(get_parameters)
 
 View(res)

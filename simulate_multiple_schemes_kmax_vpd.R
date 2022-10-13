@@ -406,9 +406,9 @@ get_simulations <- function(x){
 
 df <- par_data %>%
   # filter(!scheme %in% c("phydro_sox","phydro_wang")) %>%
-  # filter(scheme %in% c("phydro_cgain"), Species=="Picea abies") %>%
+  filter(scheme %in% c("phydro"), Species=="Quercus ilex") %>%
   # rbind(par_data_extra) %>%
-  group_split(Species,scheme,dpsi) %>%
+  group_split(Species,scheme,dpsi,source) %>%
   purrr::map(get_simulations) %>%
   bind_rows()
 # 
