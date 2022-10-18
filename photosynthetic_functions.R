@@ -182,19 +182,11 @@ calc_vcmax_coordinated_numerical <-  function(aj, ci, par_photosynth){
 }
 
 
-
-
-Jmax = (4*ϕo * Iabs) * (1/sqrt(  (ϕo*I *m/A)^2 -1 ))
-
-
-
-Con m= (ci-Γ*)/( ci+2Γ*)
-
 calc_vcmax_no_acclimated_ww <- function(A, ci, tc, patm, rdark = 0.02){
   gammastar <- calc_gammastar(tc,patm)
   rd <- calc_ftemp_inst_rd(tc)*rdark
   kmm <- calc_kmm(tc,patm)
-  Vcmax <- (A+rd) * (ci+kmm)/(ci-gammastar) # from eqn no 2.20 de von Caemmerer - Biochemical models of leaf photosynthesis
+  vcmax <- (A+rd) * (ci+kmm)/(ci-gammastar) # from eqn no 2.20 de von Caemmerer - Biochemical models of leaf photosynthesis
   # vcmax <- A*(ci + kmm)/(ci*(1-rd) - (gammastar+kmm*rd)) #calculate vcmax using Ac formulation
   return(vcmax)
 }
@@ -207,7 +199,7 @@ calc_jmax_no_acclimated_ww <- function(A, vcmax, ci, I, tc, patm, kphio = 0.087)
   # j <- 4*vcmax*(ci+2*gammastar)/(ci+kmm)#calculate j using Aj calculation based in photosynthetic-coordination hypothesis
   # jmax <- 4*phi0*I/(sqrt((4*phi0*I/j)^2-1)) #calculate jmax as the inversion of the j saturation with I
   m <- (ci-gammastar)/( ci+2*gammastar)
-  jmax <- 4*phi0*I* (1/sqrt(  (phi0*I *m/A)^2 -1 )) #eq. 13  inversion from https://doi.org/10.5194/gmd-13-1545-2020
+  jmax <- 4*phi0*I* (1/sqrt(  (phi0 * I * m/A)^2 -1 )) #eq. 13  inversion from https://doi.org/10.5194/gmd-13-1545-2020
   
   return(jmax)
 }

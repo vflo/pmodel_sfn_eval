@@ -59,8 +59,42 @@ col_df <- tibble(scheme = factor(c(#"phydro_wue",
   col = brewer_pal(palette = "Dark2")(6)
 )
 
+traits <- read.csv(file="DATA/imputation_result_plus_subsps.csv")
+traits <- traits %>% separate(taxon,c("genus","species", "subsp"),sep="_")
+olea_hv <- traits %>% 
+  filter(genus == "Olea",species=="europaea",is.na(subsp)) %>% 
+  select(Huber.value)
+olea_kl <- traits %>% 
+  filter(genus == "Olea",species=="europaea",is.na(subsp)) %>% 
+  select(KL..kg.m.1.MPa.1.s.1.)
+
 load(file = "DATA/simulations_kmax_vpd.RData")
 
+#### SIMULATIONS RESULTS ####
+
+df <- df %>% 
+  filter(dpsi == FALSE) %>%
+  mutate(chi = Ciest/ca,
+         scheme = factor(scheme, 
+                         levels = c(
+                           "phydro_cmax",
+                           "phydro_cgain", "phydro",
+                           "phydro_sox_mod",
+                           "phydro_wang_mod",
+                           "phydro_sperry"),
+                         labels = c(
+                           'CMAX','CGAIN','PHYDRO',
+                           'SOX','PROFITMAX2','PROFITMAX')),
+         acclimation = factor(acclimation, 
+                              levels = c('TRUE','FALSE'),
+                              labels = c("Acclimated", "No acclimated"))
+  ) %>% 
+  filter(
+    !Species %in% c('Betula pendula','Pinus sylvestris')
+  )
+
+
+#### PARAMETERS DATA ####
 path_par <- "DATA/parameter_kmax_vpd/"
 par_data <- list.files(path_par) %>% 
   purrr::map_df(function(x){
@@ -70,47 +104,289 @@ par_data <- list.files(path_par) %>%
 df_param <- par_data %>% 
   filter(dpsi == FALSE) %>%
   mutate(scheme = factor(scheme, 
-                         levels = c("phydro_wue","phydro_cmax",
+                         levels = c(#"phydro_wue",
+                                    "phydro_cmax",
                                     "phydro_cgain", "phydro",
-                                    "phydro_wang","phydro_sox",
+                                    # "phydro_wang","phydro_sox",
                                     "phydro_wang_mod","phydro_sox_mod",
                                     "phydro_sperry"),
-                         labels = c("WUE",'CMAX','CGAIN','PHYDRO','PROFITMAX2net','SOXnet','PROFITMAX2','SOX','PROFITMAX')) ,
+                         labels = c(#"WUE",
+                                    'CMAX','CGAIN','PHYDRO',
+                                    # 'PROFITMAX2net','SOXnet',
+                                    'PROFITMAX2','SOX','PROFITMAX')) ,
          acclimation = factor(acclimation, 
                               levels = c('TRUE','FALSE'),
                               labels = c("Acclimated", "No acclimated"))
   )%>% 
-  filter(!scheme %in% c('PROFITMAX2net',
-                        'SOXnet',
-                        'WUE'),
+  filter(
+    # !scheme %in% c('PROFITMAX2net',
+    #                     'SOXnet',
+    #                     'WUE'),
          !Species %in% c('Betula pendula','Pinus sylvestris'))
+df_param[which(df_param$Species %in% 
+                 c("Olea europaea var. Chemlali","Olea europaea var. Meski")),
+         "Huber.value"] <- olea_hv$Huber.value
+df_param[which(df_param$Species %in% 
+                 c("Olea europaea var. Chemlali","Olea europaea var. Meski")),
+         "KL..kg.m.1.MPa.1.s.1."] <- olea_kl$KL..kg.m.1.MPa.1.s.1.
 
-
-path_par_kmax_alpha <- "DATA/parameter_kmax_vpd/"
+path_par_kmax_alpha <- "DATA/parameter_kmax_alpha_vpd/"
 par_data_kmax_alpha <- list.files(path_par_kmax_alpha) %>% 
   purrr::map_df(function(x){
     readr::read_csv(paste0(path_par_kmax_alpha,x))
   })
 
+
 df_param_kmax_alpha <- par_data_kmax_alpha %>% 
   filter(dpsi == FALSE) %>%
-  mutate(scheme = factor(scheme, 
+  mutate(stomatal_model = scheme,
+         scheme = factor(scheme, 
                          levels = c("phydro_wue","phydro_cmax",
                                     "phydro_cgain", "phydro",
-                                    "phydro_wang","phydro_sox",
+                                    # "phydro_wang","phydro_sox",
                                     "phydro_wang_mod","phydro_sox_mod",
                                     "phydro_sperry"),
-                         labels = c("WUE",'CMAX','CGAIN','PHYDRO','PROFITMAX2net','SOXnet','PROFITMAX2','SOX','PROFITMAX')) ,
+                         labels = c("WUE",'CMAX','CGAIN','PHYDRO',
+                                    # 'PROFITMAX2net','SOXnet',
+                                    'PROFITMAX2','SOX','PROFITMAX')) ,
          acclimation = factor(acclimation, 
                               levels = c('TRUE','FALSE'),
                               labels = c("Acclimated", "No acclimated"))
   )%>% 
-  filter(!scheme %in% c('PROFITMAX2net',
-                        'SOXnet',
-                        'WUE'),
-         !Species %in% c('Betula pendula','Pinus sylvestris'))
+  filter(
+    # !scheme %in% c('PROFITMAX2net',
+    #                     'SOXnet',
+    #                     'WUE'),
+    !Species %in% c('Betula pendula','Pinus sylvestris'))
+df_param_kmax_alpha[which(df_param_kmax_alpha$Species %in% 
+                 c("Olea europaea var. Chemlali","Olea europaea var. Meski")),
+         "Huber.value"] <- olea_hv$Huber.value
+df_param_kmax_alpha[which(df_param_kmax_alpha$Species %in% 
+                 c("Olea europaea var. Chemlali","Olea europaea var. Meski")),
+         "KL..kg.m.1.MPa.1.s.1."] <- olea_kl$KL..kg.m.1.MPa.1.s.1.
+df_param_kmax_alpha <- df_param_kmax_alpha %>% 
+  left_join(df %>% 
+              select(scheme,source,Species,Iabs_growth,D,T,ca) %>%
+              group_by(scheme,source,Species) %>%  
+              summarise_all(mean,na.rm=TRUE)
+            ) %>% 
+  mutate(var = 0,
+         pmod = purrr::pmap(list(var, T,Iabs_growth,D,ca,K.scale,P50,b,alpha,gamma,stomatal_model), 
+                            ~model_numerical(tc =..2, ppfd = ..3, 
+                                          vpd = ..4*101325, co2 = ..5, 
+                                          elv = 0, fapar = .99, kphio = 0.087, 
+                                          psi_soil = ..1, rdark = 0.02, 
+                                          par_plant=list(conductivity = ..6*1e-16,
+                                                         psi50 = ..7%>% unique(),
+                                                         b = ..8%>% unique()), 
+                                          par_cost = list(
+                                            alpha = ..9,
+                                            gamma = ..10
+                                          ), stomatal_model = ..11 %>% unique())))%>% 
+  unnest_wider(pmod,names_sep = ".")
 
 
+
+
+
+#### ALPHA ANALYSIS ####
+sla_alpha_mod <- lmerTest::lmer(alpha~SLA..cm2.g.1.+ (1|Species)+ (1|scheme) + (1|source), data = df_param_kmax_alpha)
+anova(sla_alpha_mod)
+sla_alpha <- summary(sla_alpha_mod)$coefficients
+sla_sim <- seq(min(df_param_kmax_alpha$SLA..cm2.g.1.,na.rm = TRUE),
+    max(df_param_kmax_alpha$SLA..cm2.g.1.,na.rm = TRUE),
+    1)
+alpha_sim_sla <- sla_alpha[1,1]+sla_alpha[2,1]*sla_sim
+alpha_sd_max_sla <- sla_alpha[1,1] + sla_alpha[1,2] + (sla_alpha[2,1]+sla_alpha[2,2])*sla_sim
+alpha_sd_min_sla <- sla_alpha[1,1] - sla_alpha[1,2] + (sla_alpha[2,1]-sla_alpha[2,2])*sla_sim
+p1 <- ggplot()+
+  stat_summary(data = df_param_kmax_alpha,
+               mapping=aes(SLA..cm2.g.1.,alpha,group=interaction(species,source)),fun.data=mean_sdl, fun.args = list(mult=1), 
+               geom="pointrange", color="grey20")+
+  geom_line(aes(x = sla_sim, y = alpha_sim_sla),color = "grey20")+
+  geom_line(aes(x = sla_sim, y = alpha_sd_max_sla),color = "grey20",linetype=2)+
+  geom_line(aes(x = sla_sim, y = alpha_sd_min_sla),color = "grey20",linetype=2)+
+  annotate(geom = "text",x=5,y=0.13,hjust=0,vjust=0,label="***",size=6)+
+  mytheme2()+
+  xlab(expression("SLA  (cm"^2~"g"^-1*")"))+
+  ylab(expression(alpha))
+
+p50_alpha_mod <- lmerTest::lmer(alpha~P50 + (1|Species)+ (1|scheme) + (1|source), data = df_param_kmax_alpha)
+anova(p50_alpha_mod)
+p50_alpha <- summary(p50_alpha_mod)$coefficients
+p50_sim <- seq(min(df_param_kmax_alpha$P50,na.rm = TRUE),
+               max(df_param_kmax_alpha$P50,na.rm = TRUE),
+               1)
+alpha_sim_p50 <- p50_alpha[1,1]+p50_alpha[2,1]*p50_sim
+alpha_sd_max_p50 <- p50_alpha[1,1] + p50_alpha[1,2] + (p50_alpha[2,1]+p50_alpha[2,2])*p50_sim
+alpha_sd_min_p50 <- p50_alpha[1,1] - p50_alpha[1,2] + (p50_alpha[2,1]-p50_alpha[2,2])*p50_sim
+p2 <- ggplot()+
+  stat_summary(data = df_param_kmax_alpha,
+               mapping=aes(P50,alpha,group=interaction(species,source)),fun.data=mean_sdl, fun.args = list(mult=1), 
+               geom="pointrange", color="grey20")+
+  geom_line(aes(x = p50_sim, y = alpha_sim_p50),color = "grey20")+
+  geom_line(aes(x = p50_sim, y = alpha_sd_max_p50),color = "grey20",linetype=2)+
+  geom_line(aes(x = p50_sim, y = alpha_sd_min_p50),color = "grey20",linetype=2)+
+  annotate(geom = "text",x=-7.5,y=0.13,hjust=0,vjust=0,label="**",size=6)+
+  mytheme2()+
+  xlab(expression(psi[50]~"(MPa)"))+
+  ylab(expression(alpha))
+
+
+hv_alpha_mod <- lmerTest::lmer(alpha~log(Huber.value)+ (1|Species)+ (1|scheme) + (1|source), data = df_param_kmax_alpha)
+anova(hv_alpha_mod)
+hv_alpha <- summary(hv_alpha_mod)$coefficients
+hv_sim <- seq(min(log(df_param_kmax_alpha$Huber.value),na.rm = TRUE),
+               max(log(df_param_kmax_alpha$Huber.value),na.rm = TRUE),
+               0.1)
+alpha_sim_hv<- hv_alpha[1,1]+hv_alpha[2,1]*hv_sim
+alpha_sd_max_hv <- hv_alpha[1,1] + hv_alpha[1,2] + (hv_alpha[2,1]+hv_alpha[2,2])*hv_sim
+alpha_sd_min_hv <- hv_alpha[1,1] - hv_alpha[1,2] + (hv_alpha[2,1]-hv_alpha[2,2])*hv_sim
+p3 <- ggplot()+
+  stat_summary(data = df_param_kmax_alpha,
+               mapping=aes(log(Huber.value),alpha,group=interaction(Species,source)),fun.data=mean_sdl, fun.args = list(mult=1), 
+               geom="pointrange", color="grey20")+
+  geom_line(aes(x = hv_sim, y = alpha_sim_hv),color = "grey20")+
+  geom_line(aes(x = hv_sim, y = alpha_sd_max_hv),color = "grey20",linetype=2)+
+  geom_line(aes(x = hv_sim, y = alpha_sd_min_hv),color = "grey20",linetype=2)+
+  annotate(geom = "text",x=-7,y=0.13,hjust=0,vjust=0,label="*",size=6)+
+  mytheme2()+
+  xlab(expression("Huber value (ln("*cm[sw]^2~m[leaf]^-2*"))"))+
+  ylab(expression(alpha))
+
+k_alpha_mod <- lmerTest::lmer(alpha~log(K.scale)+ (1|Species)+ (1|scheme) + (1|source), data = df_param_kmax_alpha)
+anova(k_alpha_mod) 
+k_alpha <- summary(k_alpha_mod)$coefficients
+k_sim <- seq(min(log(df_param_kmax_alpha$K.scale),na.rm = TRUE),
+              max(log(df_param_kmax_alpha$K.scale),na.rm = TRUE),
+              0.1)
+alpha_sim_k <- k_alpha[1,1]+k_alpha[2,1]*k_sim
+alpha_sd_max_k <- k_alpha[1,1] + k_alpha[1,2] + (k_alpha[2,1]+k_alpha[2,2])*k_sim
+alpha_sd_min_k <- k_alpha[1,1] - k_alpha[1,2] + (k_alpha[2,1]-k_alpha[2,2])*k_sim
+p4 <- ggplot()+
+  stat_summary(data = df_param_kmax_alpha,
+               mapping=aes(log(K.scale),alpha,group=interaction(species,source)),
+               fun.data=mean_sdl, fun.args = list(mult=1), 
+               geom="pointrange", color="grey20")+
+  # stat_summary(data = df_param_kmax_alpha,
+  #              aes(log(55.55*KL..kg.m.1.MPa.1.s.1.),alpha,
+  #                  group=interaction(species,source)),
+  #              fun.data=mean_sdl, fun.args = list(mult=1),
+  #              geom="pointrange", shape=1)+
+  # geom_line(aes(x = k_sim, y = alpha_sim_k),color = "grey20")+
+  # geom_line(aes(x = k_sim, y = alpha_sd_max_k),color = "grey20",linetype=2)+
+  # geom_line(aes(x = k_sim, y = alpha_sd_min_k),color = "grey20",linetype=2)+
+  mytheme2()+
+  xlab(expression(K[leaf]*" (ln("*mol[H2O]~m^-1~MPa^-1~s^-1*"))"))+
+  ylab(expression(alpha))
+
+b_alpha_mod <- lmerTest::lmer(alpha~log(b) + (1|Species)+ (1|scheme) + (1|source), data = df_param_kmax_alpha)
+anova(b_alpha_mod)
+b_alpha <- summary(b_alpha_mod)$coefficients
+b_sim <- seq(min(log(df_param_kmax_alpha$b),na.rm = TRUE),
+               max(log(df_param_kmax_alpha$b),na.rm = TRUE),
+               1)
+alpha_sim_b <- b_alpha[1,1]+b_alpha[2,1]*b_sim
+alpha_sd_max_b <- b_alpha[1,1] + b_alpha[1,2] + (b_alpha[2,1]+b_alpha[2,2])*b_sim
+alpha_sd_min_b <- b_alpha[1,1] - b_alpha[1,2] + (b_alpha[2,1]-b_alpha[2,2])*b_sim
+p5 <- ggplot()+
+  stat_summary(data = df_param_kmax_alpha,
+               mapping=aes(log(b),alpha,group=interaction(species,source)),fun.data=mean_sdl, fun.args = list(mult=1),
+               geom="pointrange", color="grey20")+
+  geom_line(aes(x = b_sim, y = alpha_sim_b),color = "grey20")+
+  geom_line(aes(x = b_sim, y = alpha_sd_max_b),color = "grey20",linetype=2)+
+  geom_line(aes(x = b_sim, y = alpha_sd_min_b),color = "grey20",linetype=2)+
+  # annotate(geom = "text",x=0.1,y=0.13,hjust=0,vjust=0,label="***",size=6)+
+  mytheme2()+
+  xlab(expression("b"))+
+  ylab(expression(alpha))
+
+
+Iabs_alpha_mod <- lmerTest::lmer(alpha~ Iabs_growth + (1|Species)+ (1|scheme) + (1|source), data = df_param_kmax_alpha)
+anova(Iabs_alpha_mod)
+Iabs_alpha <- summary(Iabs_alpha_mod)$coefficients
+Iabs_sim <- seq(min(df_param_kmax_alpha$Iabs_growth,na.rm = TRUE),
+             max(df_param_kmax_alpha$Iabs_growth,na.rm = TRUE),
+             1)
+alpha_sim_Iabs <- Iabs_alpha[1,1]+Iabs_alpha[2,1]*Iabs_sim
+alpha_sd_max_Iabs <- Iabs_alpha[1,1] + Iabs_alpha[1,2] + (Iabs_alpha[2,1]+Iabs_alpha[2,2])*Iabs_sim
+alpha_sd_min_Iabs <- Iabs_alpha[1,1] - Iabs_alpha[1,2] + (Iabs_alpha[2,1]-Iabs_alpha[2,2])*Iabs_sim
+p6 <- ggplot()+
+  stat_summary(data = df_param_kmax_alpha,
+               mapping=aes(Iabs_growth,alpha,group=interaction(species,source)),fun.data=mean_sdl, fun.args = list(mult=1),
+               geom="pointrange", color="grey20")+
+  geom_line(aes(x = Iabs_sim, y = alpha_sim_Iabs),color = "grey20")+
+  geom_line(aes(x = Iabs_sim, y = alpha_sd_max_Iabs),color = "grey20",linetype=2)+
+  geom_line(aes(x = Iabs_sim, y = alpha_sd_min_Iabs),color = "grey20",linetype=2)+
+  # annotate(geom = "text",x=0.1,y=0.13,hjust=0,vjust=0,label="***",size=6)+
+  mytheme2()+
+  xlab(expression(I[growth]~"("*mu*"mol"~m^-2~s^-1*")"))+
+  ylab(expression(alpha))
+
+
+sla_jmax0_mod <- lmerTest::lmer(pmod.jmax~SLA..cm2.g.1.+ (1|Species)+ (1|scheme) + (1|source), data = df_param_kmax_alpha)
+anova(sla_jmax0_mod)
+sla_alpha <- summary(sla_jmax0_mod)
+
+I_jmax0_mod <- lmerTest::lmer(pmod.jmax~Iabs_growth+ (1|Species)+ (1|scheme) + (1|source), data = df_param_kmax_alpha)
+anova(I_jmax0_mod)
+summary(I_jmax0_mod)
+
+alpha_jmax0_mod <- lmerTest::lmer(pmod.jmax~alpha+ (1|Species)+ (1|scheme) + (1|source), data = df_param_kmax_alpha)
+anova(alpha_jmax0_mod)
+summary(alpha_jmax0_mod)
+
+ggarrange(p1,p2,p3,p4, 
+          align='hv', labels=c('a', 'b','c','d'),
+          ncol=2, nrow = 2)
+
+alpha_mod <- lmerTest::lmer(alpha~ SLA..cm2.g.1.+Iabs_growth+D+ l_b + lk.scale+P50 + (1|Species)+ (1|scheme)+ (1|source), 
+                            data = df_param_kmax_alpha %>%
+                              mutate(KL = log(KL..kg.m.1.MPa.1.s.1.*55.5),
+                            hv = log(Huber.value),
+                            lk.scale =log(K.scale),l_b = log(b))
+                            )
+summary(alpha_mod)
+step(alpha_mod)
+alpha_mod <- lmerTest::lmer(#alpha~ SLA..cm2.g.1.+D+ l_b + lk.scale+P50 + (1|scheme)+ (1|source), 
+                            alpha ~ SLA..cm2.g.1. + Iabs_growth + l_b + (1 | Species) + (1 | scheme),
+                            data = df_param_kmax_alpha %>%
+                              mutate(KL = log(KL..kg.m.1.MPa.1.s.1.*55.5),
+                                     hv = log(Huber.value),
+                                     lk.scale =log(K.scale),l_b = log(b))
+)
+summary(alpha_mod)
+MuMIn::r.squaredGLMM(alpha_mod)
+
+# library("factoextra")
+# df_k_a_pca <- df_param_kmax_alpha %>% 
+#   select(alpha,Huber.value,SLA..cm2.g.1.,K.scale,P50,b) %>% 
+#   drop_na 
+# res.pca <- prcomp(df_k_a_pca, scale = TRUE)
+# fviz_eig(res.pca)
+# fviz_pca_ind(res.pca,
+#              col.ind = "cos2", # Color by the quality of representation
+#              gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+#              repel = TRUE     # Avoid text overlapping
+# )
+# fviz_pca_var(res.pca,
+#              col.var = "contrib", # Color by contributions to the PC
+#              gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+#              repel = TRUE     # Avoid text overlapping
+# )
+# 
+# groups <- df_param_kmax_alpha %>% 
+#   select(Species,alpha,Huber.value,SLA..cm2.g.1.,K.scale,P50,b) %>% 
+#   drop_na %>% 
+#   select(Species)
+# fviz_pca_ind(res.pca,
+#              col.ind = groups$Species, # color by groups
+#              # palette = c("#00AFBB",  "#FC4E07"),
+#              addEllipses = TRUE, # Concentration ellipses
+#              ellipse.type = "confidence",
+#              legend.title = "Groups",
+#              repel = TRUE
+# )
 
 # 
 # df_param %>% 
@@ -128,6 +404,11 @@ df_param_kmax_alpha <- par_data_kmax_alpha %>%
 # pwpp(emmeans(K_par_mod, ~ scheme*acclimation), by = 'acclimation', type = "response")
 # pwpp(emmeans(K_par_mod, ~ scheme*acclimation), by = 'scheme', type = "response")
 # 
+
+
+
+
+
 
 df_param %>% 
   filter(scheme %in% c('PROFITMAX2',
@@ -180,51 +461,26 @@ df_param %>%
 #   mytheme()
 
 
-#### SIMULATIONS RESULTS ####
 
-df <- df %>% 
-  # filter(dpsi == TRUE & scheme %in% c("phydro")|
-  #          dpsi == FALSE & !scheme %in% c("phydro")) %>%
-  filter(dpsi == FALSE) %>%
-  mutate(chi = Ciest/ca,
-         scheme = factor(scheme, 
-                         levels = c("phydro_wue","phydro_cmax",
-                                    "phydro_cgain", "phydro",
-                                    # "phydro_wang","phydro_sox",
-                                    "phydro_sox_mod",
-                                    "phydro_wang_mod",
-                                    "phydro_sperry"),
-                         labels = c("WUE",'CMAX','CGAIN','PHYDRO',
-                                    # 'PROFITMAX2net','SOXnet',
-                                    'SOX','PROFITMAX2','PROFITMAX')),
-         acclimation = factor(acclimation, 
-                              levels = c('TRUE','FALSE'),
-                              labels = c("Acclimated", "No acclimated"))
-  ) %>% 
-  filter(!scheme %in% c('PROFITMAX2net',
-                        'SOXnet',
-                        'WUE'),
-         !Species %in% c('Betula pendula','Pinus sylvestris')
-         )
 
 
 ################################################################################
 #### A
 ################################################################################
 df_a <- df %>% 
-  group_by(scheme,acclimation,Species) %>% 
+  group_by(scheme,acclimation,Species,source) %>% 
   filter(!is.na(A)) %>% 
   mutate(diff_a = A - a_pred) %>% 
   summarise(n_dist = n(),
             r = cor(A, a_pred, use = "pairwise.complete.obs"),
             bias = mean(diff_a,na.rm = TRUE)/mean(A,na.rm = TRUE),
             rmse = Metrics::rmse(A,a_pred),
-            beta = lm(A~a_pred)$coefficients[2]) %>% 
-  filter(beta>= -40)
+            beta = lm(A~a_pred)$coefficients[2])# %>% 
+  # filter(beta>= -40)
 
 
 
-r_a <- lmerTest::lmer(r~scheme*acclimation + (1|Species), data = df_a#, weights = n_dist
+r_a <- lmerTest::lmer(r~scheme*acclimation + (1|Species), data = df_a, weights = n_dist
                       )
 r_a_p <- emmeans::contrast(emmeans(r_a, "acclimation",by='scheme'))%>% 
   broom::tidy() %>% 
@@ -258,7 +514,7 @@ p1 <- df_a %>%
 
 
 
-beta_a <- lmerTest::lmer(beta~scheme*acclimation + (1|Species), data = df_a#, weights = n_dist
+beta_a <- lmerTest::lmer(beta~scheme*acclimation + (1|Species), data = df_a, weights = n_dist
                          )
 beta_a_p <- emmeans::contrast(emmeans(beta_a, "acclimation",by='scheme'))%>% 
   broom::tidy() %>% 
@@ -285,7 +541,7 @@ p2 <- df_a%>%
   mytheme2()+
   theme(legend.title = element_blank())+
   xlab("")+
-  ylim(-10,40)+
+  ylim(-10,30)+
   ylab(expression(' Assimilation rate'~beta))+
   scale_color_manual(values = c("#A6611A","#018571"))+
   scale_fill_manual(values =c("#DFC27D","#80CDC1"))+
@@ -296,7 +552,7 @@ p2 <- df_a%>%
 
 
 
-rmse_a <- lmerTest::lmer(rmse~scheme*acclimation + (1|Species), data = df_a#, weights = n_dist
+rmse_a <- lmerTest::lmer(rmse~scheme*acclimation + (1|Species), data = df_a, weights = n_dist
                          )
 rmse_a_p <- emmeans::contrast(emmeans(rmse_a, "acclimation",by='scheme'))%>% 
   broom::tidy() %>% 
@@ -324,10 +580,10 @@ p3 <- df_a %>%
   ylab(expression("Assimilation rate RMSE  ("*mu*"mol m"^-2~"s"^-1*")"))+
   scale_color_manual(values = c("#A6611A","#018571"))+
   scale_fill_manual(values =c("#DFC27D","#80CDC1"))+
-  scale_shape_manual(values = c(1,19))+ #since all the pairs have significant difference, select only sig shape
+  scale_shape_manual(values = c(19))+ #since all the pairs have significant difference, select only sig shape
   coord_flip()
 
-bias_a <- lmerTest::lmer(bias~scheme*acclimation + (1|Species), data = df_a#, weights = n_dist
+bias_a <- lmerTest::lmer(bias~scheme*acclimation + (1|Species), data = df_a, weights = n_dist
                          )
 bias_a_p <- emmeans::contrast(emmeans(bias_a, "acclimation",by='scheme'))%>% 
   broom::tidy() %>% 
@@ -471,7 +727,7 @@ df %>%
 #### G
 ################################################################################
 df_g <- df %>% 
-  group_by(scheme,acclimation,Species) %>% 
+  group_by(scheme,acclimation,Species,source) %>% 
   filter(!is.na(gC)) %>% 
   mutate(diff_g = gC - g_pred) %>% 
   summarise(n_dist = n(),
@@ -724,7 +980,7 @@ df %>%
 #### CHI
 ################################################################################
 df_c <- df %>% 
-  group_by(scheme,acclimation,Species) %>% 
+  group_by(scheme,acclimation,Species,source) %>% 
   filter(!is.na(chi)) %>% 
   mutate(diff_c = chi - c_pred) %>% 
   summarise(n_dist = n(),
@@ -943,7 +1199,7 @@ df %>%
 #### DPSI
 ################################################################################
 df_d <- df %>% 
-  group_by(scheme,acclimation,Species) %>% 
+  group_by(scheme,acclimation,Species,source) %>% 
   filter(!is.na(Dpsi)) %>% select(Dpsi,d_pred)%>% 
   mutate(diff_d = Dpsi - d_pred) %>% 
   summarise(n_dist = n(),
@@ -1162,7 +1418,7 @@ df %>%
 #### SIMULATION + PARAMETERS ANALYSIS
 ################################################################################
 df_a_diff <- df %>% 
-  group_by(scheme,acclimation,Species) %>% 
+  group_by(scheme,acclimation,Species,source) %>% 
   filter(!is.na(A)) %>% 
   select(-c(dpsi,genus,species,subsp,P88..MPa.,P50..MPa.,P12..MPa.,
              SLA..cm2.g.1.,Height.max..m.,Ks..kg.m.1.MPa.1.s.1.,Huber.value,
@@ -1178,7 +1434,7 @@ df_a_diff <- df %>%
                          SLA..cm2.g.1.,Height.max..m.,Ks..kg.m.1.MPa.1.s.1.,Huber.value,
                          KL..kg.m.1.MPa.1.s.1.))) %>%
   ungroup() %>%
-  pivot_wider(names_from = acclimation, values_from = c(5:13)) %>% 
+  pivot_wider(names_from = acclimation, values_from = c(5:8,10:14)) %>% 
   mutate(r_diff = r_Acclimated - `r_No acclimated`,
          bias_diff = bias_Acclimated - `bias_No acclimated`,
          rmse_diff = rmse_Acclimated - `rmse_No acclimated`,
@@ -1236,6 +1492,51 @@ annotate_figure(
   left = textGrob("(Acclimated - No acclimated) A rate r Pearson's correlation", 
                   rot = 90, vjust = 1, gp = gpar(cex = 1)))
 
+# A - BETA
+p1 <- df_a_diff %>% 
+  # filter(scheme %in% c("PROFITMAX","PROFITMAX2","SOX")) %>%
+  mutate(beta_diff = case_when(scheme %in% c("PROFITMAX","PROFITMAX2","SOX")~beta_diff,
+                               TRUE~NA_real_)) %>% 
+  ggplot(aes(K.scale_diff, beta_diff, color = scheme, group = scheme))+
+  geom_hline(yintercept = 0, color = "grey20", linetype = 3)+
+  geom_vline(xintercept = 0, color = "grey20", linetype = 3)+
+  # geom_encircle()+
+  geom_convexhull(alpha=0, fill = "transparent", size = 1.3, show.legend = FALSE)+
+  geom_point()+
+  # geom_density_2d()+
+  mytheme2()+
+  theme(legend.title = element_blank())+
+  scale_colour_manual(breaks = col_df$scheme, 
+                      values = unique(as.character(col_df$col)))+
+  # scale_color_manual(values = brewer_pal(palette = "RdYlGn")(4))+
+  # ylab(expression("(Acclimated - No acclimated) A rate r Pearson's correlation"))+
+  ylab("")+
+  xlab(expression(Delta*"K"))
+
+p2 <- df_a_diff %>% 
+  # filter(scheme %in% c("WUE","CGAIN","CMAX",'PHYDRO')) %>% 
+  ggplot(aes(gamma_diff, beta_diff, color = scheme, group = scheme))+
+  geom_hline(yintercept = 0, color = "grey20", linetype = 3)+
+  geom_vline(xintercept = 0, color = "grey20", linetype = 3)+
+  # geom_encircle()+
+  geom_convexhull(alpha=0, fill = "transparent", size = 1.3, show.legend = FALSE)+
+  geom_point()+
+  # geom_density_2d()+
+  mytheme2()+
+  theme(legend.title = element_blank())+
+  scale_colour_manual(breaks = col_df$scheme, 
+                      values = unique(as.character(col_df$col)))+
+  # scale_color_manual(values = brewer_pal(palette = "RdYlGn")(4))+
+  # ylab(expression("(Acclimated - No acclimated) A rate r Pearson's correlation"))+
+  ylab("")+
+  xlab(expression(Delta*gamma))
+
+annotate_figure(
+  ggarrange(p1,p2,
+            align='hv', labels=c('a', 'b'),
+            common.legend = T,ncol=2, nrow = 1),
+  left = textGrob("(Acclimated - No acclimated) A rate \u03B2", 
+                  rot = 90, vjust = 1, gp = gpar(cex = 1)))
 
 
 # A - RMSE
@@ -1387,6 +1688,7 @@ get_no_acclimated_response <- function(x,tc_now,ppfd_now,vpd_now,co2_now){
 Qi_params_no <- df_param %>% 
   filter(Species=="Quercus ilex",
          acclimation == "No acclimated",
+         source == "Epron and Dreyer (1990)",
          dpsi == FALSE) %>% 
   mutate(stomatal_model = fct_recode(scheme,
                                      phydro_cgain = 'CGAIN',
@@ -1451,7 +1753,7 @@ get_acclimated_response <- function(x,tc_now,ppfd_now,vpd_now,co2_now){
     b = x$b%>% unique()
   )
   par_cost_now = list(
-    alpha = 0.1,
+    alpha = x$alpha,
     gamma = x$gamma
   )
   ndays = 30
@@ -1507,8 +1809,9 @@ get_acclimated_response <- function(x,tc_now,ppfd_now,vpd_now,co2_now){
 
 
 Q_params <- df_param %>% 
-  filter(Species%in%c("Quercus ilex","Quercus suber","Quercus coccifera"),
+  filter(Species%in%c("Quercus ilex","Quercus petraea","Quercus pubescens"),
          acclimation == "Acclimated",
+         source == "Epron and Dreyer (1990)",
          dpsi == FALSE) %>% 
   mutate(stomatal_model = fct_recode(scheme,
                              phydro_cgain = 'CGAIN',
@@ -1523,8 +1826,26 @@ Q_params_actual <- df_param %>%
               select(Species,ca,T,D,Iabs_used,gC) %>% 
               group_by(Species) %>% 
               summarise_all(mean, na.rm=TRUE)) %>% 
-  filter(Species%in%c("Quercus ilex","Quercus suber","Quercus coccifera"),
+  filter(Species%in%c("Quercus ilex","Quercus petraea","Quercus pubescens"),
          acclimation == "Acclimated",
+         source == "Epron and Dreyer (1990)",
+         dpsi == FALSE) %>% 
+  mutate(stomatal_model = fct_recode(scheme,
+                                     phydro_cgain = 'CGAIN',
+                                     phydro_cmax = 'CMAX',
+                                     phydro = 'PHYDRO',
+                                     phydro_sox_mod = 'SOX',
+                                     phydro_sperry = 'PROFITMAX',
+                                     phydro_wang_mod = 'PROFITMAX2'))
+
+Q_params_actual_kmax_alpha <- df_param_kmax_alpha %>% 
+  left_join(df %>% 
+              select(Species,ca,T,D,Iabs_used,gC) %>% 
+              group_by(Species) %>% 
+              summarise_all(mean, na.rm=TRUE)) %>% 
+  filter(Species%in%c("Quercus ilex","Quercus petraea","Quercus pubescens"),
+         acclimation == "Acclimated",
+         source == "Epron and Dreyer (1990)",
          dpsi == FALSE) %>% 
   mutate(stomatal_model = fct_recode(scheme,
                                      phydro_cgain = 'CGAIN',
@@ -1610,8 +1931,19 @@ df_summary_actual<- df_sim_Q_actual  %>%
   select(psi88S) %>% 
   summarise_all(mean,na.rm=TRUE)
 
+df_sim_Q_actual_kmax_alpha <- Q_params_actual_kmax_alpha %>%
+  rowwise() %>%
+  do(mapped = get_acclimated_response(.,tc_now=.$T,ppfd_now=.$Iabs_used,vpd_now=.$D*101325,co2_now = .$ca)) %>% 
+  unnest(cols = c(mapped))
+df_summary_actual_kmax_alpha <- df_sim_Q_actual_kmax_alpha  %>% 
+  group_by(Species,scheme) %>% 
+  select(psi88S) %>% 
+  summarise_all(mean,na.rm=TRUE)
+
 df_test <- df %>% 
-  filter(Species%in%c("Quercus ilex","Quercus suber","Quercus coccifera"))
+  filter(Species%in%c("Quercus ilex","Quercus petraea","Quercus pubescens"),
+         acclimation == "Acclimated",
+         source == "Epron and Dreyer (1990)")
 df_summary_sp <- df_test %>% 
   group_by(Species) %>% 
   select(P50) %>% 
@@ -1712,7 +2044,39 @@ p3 <- df_sim_Q_actual  %>%
   guides(colour = guide_legend(nrow = 1))+
   facet_wrap(~Species)+
   xlim(-7,0)+
-  ylim(0,120)+
+  ylim(0,60)+
+  NULL
+
+p4 <- df_sim_Q_actual_kmax_alpha %>%
+  # rbind(df_sim_Ep) %>% 
+  # rbind(df_sim_Epo) %>%
+  # filter(a>0.2) %>%
+  ggplot()+
+  geom_line(aes(var,jmax,color = scheme),size = 1)+
+  geom_line(aes(p_leaf,jmax,color = scheme,group = interaction(Species,scheme)), 
+            linetype = 2,size = 1)+
+  # geom_segment(aes(x=psi88S,xend=psi88S, y= 190, yend= 170,color=scheme),
+  #              arrow = arrow(length = unit(0.3, "cm")),
+  #              lineend = c('round'),linejoin = c('mitre'),
+  #              data=df_summary_high,
+  #              linetype = 1,size=1,
+  #              show.legend = FALSE)+
+  # geom_segment(data=df_summary_sp,aes(x=P50,xend=P50,y=190,yend=170),
+  #              arrow = arrow(length = unit(0.3, "cm")),
+  #              lineend = c('round'),linejoin = c('mitre'),
+  #              linetype = 1,color="grey20",size=1)+
+  mytheme()+
+  labs(color = "")+
+  xlab(expression(psi*" (MPa)"))+
+  ylab(expression(atop("J"[max]*" ("*mu*"mol m"^-2~"s"^-1*")")))+
+  scale_colour_manual(breaks = col_df$scheme, 
+                      values = unique(as.character(col_df$col)))+
+  theme(legend.position = "top",
+        legend.background = element_rect(fill="transparent"))+
+  guides(colour = guide_legend(nrow = 1))+
+  facet_wrap(~Species)+
+  xlim(-7,0)+
+  ylim(0,70)+
   NULL
 
 ggarrange(p1,p2, 
@@ -2113,7 +2477,7 @@ df_sim_jmax %>%
 #### A ONLY DROUGHT
 ################################################################################
 df_a <- df %>% 
-  group_by(scheme,acclimation,Species) %>% 
+  group_by(scheme,acclimation,Species,source) %>% 
   mutate(LWP_q50 = quantile(LWP, 0.5,na.rm = TRUE)) %>% 
   filter(!is.na(A),LWP<=LWP_q50) %>% 
   mutate(diff_a = A - a_pred) %>% 
@@ -2273,7 +2637,7 @@ ggarrange(p1,p2,p3,p4,
 #### CHI
 ################################################################################
 df_c <- df %>% 
-  group_by(scheme,acclimation,Species) %>% 
+  group_by(scheme,acclimation,Species,source) %>% 
   mutate(LWP_q75 = quantile(LWP, 0.75,na.rm = TRUE)) %>% 
   filter(!is.na(chi),LWP<=LWP_q75) %>% 
   mutate(diff_c = chi - c_pred) %>% 
@@ -2427,7 +2791,7 @@ library(grid)
 df_a %>% 
   ungroup() %>% 
   filter(acclimation == "Acclimated") %>% 
-  select(Species,scheme,r) %>% 
+  select(Species,scheme,r,source) %>% 
   # pivot_wider(values_from = 'r', names_from = 'scheme') %>% 
   # grid.table(theme = ttheme_minimal(
   #   core=list(bg_params = list(fill = blues9[1:4], col=NA),

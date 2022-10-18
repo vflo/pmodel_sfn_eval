@@ -180,8 +180,7 @@ fun_accl = function(data, dpsi_calib=T, inst=F, k=7,
   data$Ciest = data$ca-data$A/data$gC
   dpsi_data = dpsi_df %>% filter(Species == Species_now)
 
-  cat("inst resp\n")
-  ndays = mean(data$Drydown.days)
+  
   psi_crit = par_plant_now$psi50 * (log(1000)/log(2)) ^ ( 1/par_plant_now$b)
   if(min(data$LWP,na.rm = TRUE)<psi_crit){
     psi_min = psi_crit
@@ -192,15 +191,80 @@ fun_accl = function(data, dpsi_calib=T, inst=F, k=7,
   # cat(ndays,"\n")
   
   lwp = seq(psi_min,0, length.out=20)
-  day = ndays * (lwp-psi_max)/(psi_min-psi_max)
-  actual_day = ndays * (data$LWP-psi_max)/(psi_min-psi_max)
   lwp_day = function(day_num){
     psi_max + day_num/ndays * (psi_min-psi_max)
   }
   
-  # k = 7
+  if (inst == F){
+    cat("Acc resp\n")
+    ndays = 20
+    day = ndays * (lwp-psi_max)/(psi_min-psi_max)
+    actual_day = ndays * (data$LWP-psi_max)/(psi_min-psi_max)
+    lwp_week = rollmean(x = lwp_day(c(20:0, rep(0,k-1))), k = k, align = "right")
+    spl = splinefun(x = 20:0, y=lwp_week)
+    dat_acc = tibble(var = spl(actual_day)) %>%
+      mutate(var = case_when(var>0~0,
+                             TRUE~var),
+             p = purrr::map(var,
+                            ~model_numerical(tc = mean(data$T,na.rm = TRUE),
+                                             ppfd = mean(data$Iabs_growth,na.rm = TRUE),
+                                             vpd = mean(data$D*101325,na.rm = TRUE),
+                                             co2 = mean(data$ca,na.rm = TRUE), elv = 0,
+                                             fapar = .99, kphio = 0.087, psi_soil = .,
+                                             rdark = 0.02, par_plant=par_plant_now,
+                                             par_cost = par_cost_now,
+                                             stomatal_model = stomatal_model))) %>%
+      unnest_wider(p)
+    lwp_actual = data$LWP
+    dat1 = tibble(var = lwp_actual, jmax_a=dat_acc$jmax, vcmax_a=dat_acc$vcmax) %>% 
+      cbind(data %>% select(t=T,Iabs_used, D,ca)) %>% 
+      mutate(var = case_when(var>0~0,
+                             TRUE~var),
+             p = purrr::pmap(list(var, jmax_a, vcmax_a,t,Iabs_used,D,ca), 
+                             ~model_numerical_instantaneous(tc = ..4, 
+                                                            ppfd = ..5, 
+                                                            vpd = ..6*101325, 
+                                                            co2 = ..7, elv = 0, 
+                                                            fapar = .99, kphio = 0.087, 
+                                                            psi_soil = ..1, rdark = 0.02, 
+                                                            par_plant=par_plant_now, 
+                                                            par_cost = par_cost_now, 
+                                                            jmax = ..2, vcmax = ..3, 
+                                                            stomatal_model = stomatal_model)) ) %>% 
+      unnest_wider(p)
+    
+    #Calculate all the dry down to estimate psi88S
+    dat_acc = tibble(var = spl(day)) %>% 
+      mutate(var = case_when(var>0~0,
+                             TRUE~var),
+             pmod = map(var, ~model_numerical(tc = mean(data$T,na.rm = TRUE), 
+                                              ppfd = mean(data$Iabs_growth,na.rm = TRUE), 
+                                              vpd = mean(data$D*101325,na.rm = TRUE), 
+                                              co2 = mean(data$ca,na.rm = TRUE), 
+                                              elv = 0, fapar = .99, kphio = 0.087, 
+                                              psi_soil = ., rdark = 0.02, par_plant=par_plant_now, 
+                                              par_cost = par_cost_now, stomatal_model = stomatal_model))) %>% 
+      unnest_wider(pmod)
+    dat2 = tibble(var = lwp, jmax_a=dat_acc$jmax, vcmax_a=dat_acc$vcmax) %>%
+      mutate(p = purrr::pmap(list(var, jmax_a, vcmax_a), 
+                             ~model_numerical_instantaneous(tc = mean(data$T,na.rm = TRUE), 
+                                                            ppfd = mean(data$Iabs_used,na.rm = TRUE), 
+                                                            vpd = mean(data$D*101325,na.rm = TRUE), 
+                                                            co2 = mean(data$ca,na.rm = TRUE), elv = 0, 
+                                                            fapar = .99, kphio = 0.087, 
+                                                            psi_soil = ..1, rdark = 0.02, 
+                                                            par_plant=par_plant_now, 
+                                                            par_cost = par_cost_now, 
+                                                            jmax = ..2, vcmax = ..3, 
+                                                            stomatal_model = stomatal_model)) ) %>% 
+      unnest_wider(p)
+    
+  }else{
+  cat("inst resp\n")
+  ndays = mean(data$Drydown.days)
+  day = ndays * (lwp-psi_max)/(psi_min-psi_max)
+  actual_day = ndays * (data$LWP-psi_max)/(psi_min-psi_max)
   lwp_week = rollmean(x = lwp_day(c(max(day):0, rep(0,k-1))), k = k, align = "right")
-  
   spl = splinefun(x = max(day):0, y=lwp_week)
 
   dat_acc = tibble(var = spl(actual_day)) %>% 
@@ -255,6 +319,7 @@ fun_accl = function(data, dpsi_calib=T, inst=F, k=7,
                                                           jmax = ..2, vcmax = ..3, 
                                                           stomatal_model = stomatal_model)) ) %>% 
     unnest_wider(p)
+  }
     dat2 <- dat2# %>% filter(gs>=1e-40)
     gx = log(dat2$gs)
     gy = dat2$var
@@ -325,7 +390,7 @@ get_simulations <- function(x){
   print(stomatal_model_now)
   dpsi_calib = x$dpsi %>% unique()
   inst = x$inst %>% unique()
-  data1=filter(dat, Species==species)
+  data1=filter(dat, Species==species, Source == x$source %>% unique())
   
   ##### SIMULATION WITH ACCLIMATION #####
   par_plant_acclimation = as.list(tibble(
@@ -406,7 +471,7 @@ get_simulations <- function(x){
 
 df <- par_data %>%
   # filter(!scheme %in% c("phydro_sox","phydro_wang")) %>%
-  filter(scheme %in% c("phydro"), Species=="Quercus ilex") %>%
+  # filter(scheme %in% c("phydro"), Species=="Broussonetia papyrifera") %>%
   # rbind(par_data_extra) %>%
   group_split(Species,scheme,dpsi,source) %>%
   purrr::map(get_simulations) %>%

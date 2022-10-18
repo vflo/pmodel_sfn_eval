@@ -29,6 +29,7 @@ opt_curve_param_vc <- function(par,p88,p50,p12){
   res <- (1/2)^((psi/p)^b)
   vulne_curve <- c(0.12,0.5,0.88)
   rmse <- sqrt(sum((vulne_curve-res)^2)/length(vulne_curve))
+  if(b<1){rmse <- 1e6}
   return(rmse)
 }
 
@@ -218,29 +219,64 @@ error_fun_kmax_alpha = function(x, data, data_template,  plot=F, inst=TRUE,
       dpsi_data=NULL
     }
 
-      cat("inst resp\n")
-      ndays = mean(data$Drydown.days)
-      psi_crit = data_template$P50 * (log(1000)/log(2)) ^ ( 1/data_template$b)
-      if(min(data$LWP,na.rm = TRUE)<psi_crit){
-        psi_min = psi_crit
-      }else{
-        psi_min = min(data$LWP,na.rm = TRUE) #-6
-        }
-      psi_max = 0 #max(data$LWP)
-      # cat(ndays,"\n")
-      
-      lwp = seq(psi_min,0, length.out=20)
-      day = ndays * (lwp-psi_max)/(psi_min-psi_max)
-      actual_day = ndays * (data$LWP-psi_max)/(psi_min-psi_max)
-      lwp_day = function(day_num){
-        psi_max + day_num/ndays * (psi_min-psi_max)
-      }
-      
-      # k = 7
-      lwp_week = rollmean(x = lwp_day(c(max(day):0, rep(0,k-1))), k = k, align = "right")
-      
-      spl = splinefun(x = max(day):0, y=lwp_week)
+  ndays = mean(data$Drydown.days)
+  psi_crit = data_template$P50 * (log(1000)/log(2)) ^ ( 1/data_template$b)
+  if(min(data$LWP,na.rm = TRUE)<psi_crit){
+    psi_min = psi_crit
+  }else{
+    psi_min = min(data$LWP,na.rm = TRUE) #-6
+  }
+  psi_max = 0 #max(data$LWP)
+  # cat(ndays,"\n")
+  
+  lwp = seq(psi_min,0, length.out=20)
+  day = ndays * (lwp-psi_max)/(psi_min-psi_max)
+  actual_day = ndays * (data$LWP-psi_max)/(psi_min-psi_max)
+  lwp_day = function(day_num){
+    psi_max + day_num/ndays * (psi_min-psi_max)
+  }
 
+  if (inst == F){
+    cat("Acc resp\n")
+    ndays = 20
+    actual_day = ndays * (data$LWP-psi_max)/(psi_min-psi_max)
+    lwp_week = rollmean(x = lwp_day(c(20:0, rep(0,k-1))), k = k, align = "right")
+    spl = splinefun(x = 20:0, y=lwp_week)
+    # lwp = seq(min(data$LWP), 0, length.out=20)
+    dat_acc = tibble(var = spl(actual_day)) %>%
+      mutate(var = case_when(var>0~0,
+                             TRUE~var),
+             p = purrr::map(var,
+                            ~model_numerical(tc = mean(data$T,na.rm = TRUE),
+                                             ppfd = mean(data$Iabs_growth,na.rm = TRUE),
+                                             vpd = mean(data$D*101325,na.rm = TRUE),
+                                             co2 = mean(data$ca,na.rm = TRUE), elv = 0,
+                                             fapar = .99, kphio = 0.087, psi_soil = .,
+                                             rdark = 0.02, par_plant=par_plant_now,
+                                             par_cost = par_cost_now,
+                                             stomatal_model = stomatal_model))) %>%
+      unnest_wider(p)
+    lwp = data$LWP
+    dat1 = tibble(var = lwp, jmax_a=dat_acc$jmax, vcmax_a=dat_acc$vcmax) %>% 
+      cbind(data %>% select(t=T,Iabs_used, D,ca)) %>% 
+      mutate(var = case_when(var>0~0,
+                             TRUE~var),
+             p = purrr::pmap(list(var, jmax_a, vcmax_a,t,Iabs_used,D,ca), 
+                             ~model_numerical_instantaneous(tc = ..4, 
+                                                            ppfd = ..5, 
+                                                            vpd = ..6*101325, 
+                                                            co2 = ..7, elv = 0, 
+                                                            fapar = .99, kphio = 0.087, 
+                                                            psi_soil = ..1, rdark = 0.02, 
+                                                            par_plant=par_plant_now, 
+                                                            par_cost = par_cost_now, 
+                                                            jmax = ..2, vcmax = ..3, 
+                                                            stomatal_model = stomatal_model)) ) %>% 
+      unnest_wider(p)
+  }else{
+    cat("inst resp\n")
+    lwp_week = rollmean(x = lwp_day(c(max(day):0, rep(0,k-1))), k = k, align = "right")
+    spl = splinefun(x = max(day):0, y=lwp_week)
       dat_acc = tibble(var = spl(actual_day)) %>% 
         mutate(var = case_when(var>0~0,
                                TRUE~var),
@@ -315,18 +351,20 @@ get_parameters_kmax_alpha <- function(x){
     dpsi_calib_now = x$dpsi %>% unique()
     inst = x$inst
     data_template_now = x
-    data1 = filter(dat, Species==species)
+    data1 = filter(dat, Species==species, Source == unique(x$source))
     if(!is.null(K_sperry)){
     K_sperry_no_acclimate = K_sperry %>% 
       filter(Species == species,
              acclimation == FALSE,
-             dpsi == dpsi_calib_now) %>% 
+             dpsi == dpsi_calib_now,
+             source == x$source) %>% 
       select(K_sperry) %>% 
       unique()
     K_sperry_acclimate = K_sperry %>% 
       filter(Species == species,
              acclimation == TRUE,
-             dpsi == dpsi_calib_now) %>% 
+             dpsi == dpsi_calib_now,
+             source == x$source) %>% 
       select(K_sperry) %>% 
       unique()
     }
@@ -396,8 +434,8 @@ save(res,file = "DATA/K_sperry_meta-analysis_kmax_alpha_vpd.RData")
 load(file = "DATA/K_sperry_meta-analysis_kmax_alpha_vpd.RData")
 
 K_sperry <- res %>% 
-  select(Species,K_sperry = K.scale,dpsi,acclimation) %>% 
-  group_by(Species,dpsi, acclimation) %>% 
+  select(Species,K_sperry = K.scale,dpsi,acclimation,source) %>% 
+  group_by(Species,dpsi, acclimation,source) %>% 
   summarise_all(unique)
 
 #Compute the rest of the models
@@ -405,6 +443,6 @@ template %>%
   filter(!scheme %in% c("phydro_sperry"),
          dpsi == FALSE) %>%
   # filter(scheme %in% c("phydro")) %>%
-  # filter(scheme %in% c("phydro_cmax"), Species == "Quercus ilex") %>%
+  filter(Species == "Quercus ilex") %>%
   group_split(scheme, dpsi, Species,source) %>% 
   purrr::map_df(get_parameters_kmax_alpha)
