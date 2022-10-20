@@ -25,10 +25,19 @@ source("QUADP.R")
 opt_curve_param_vc <- function(par,p88,p50,p12){
   p <- par[1]
   b <- par[2]
-  psi <- c(p88,p50,p12)
-  res <- (1/2)^((psi/p)^b)
-  vulne_curve <- c(0.12,0.5,0.88)
-  rmse <- sqrt(sum((vulne_curve-res)^2)/length(vulne_curve))
+  if(p12>=-1){
+    psi <- c(p88,p50)
+    res <- (1/2)^((psi/p)^b)
+    vulne_curve <- c(0.12,0.5)
+    rmse <- sqrt(sum((vulne_curve-res)^2)/length(vulne_curve))
+    
+  }else{
+    psi <- c(p88,p50,p12)
+    res <- (1/2)^((psi/p)^b)
+    vulne_curve <- c(0.12,0.5,0.88)
+    rmse <- sqrt(sum((vulne_curve-res)^2)/length(vulne_curve))
+  }
+  
   if(b<1){rmse <- 1e6}
   return(rmse)
 }
@@ -178,7 +187,7 @@ plot_all = function(df_w_vol, varname, species, data, dpsi_data=NULL, analytical
 error_fun_kmax_alpha = function(x, data, data_template,  plot=F, inst=TRUE,
                      dpsi_calib=T, k=7, stomatal_model = stomatal_model_now, 
                      Species_now = species,K_sperry = K_sperry_acclimate){
-  parameter_max <- c(10,0.15)
+  parameter_max <- c(20,0.15)
   if(stomatal_model %in% c("phydro_cgain")){
     parameter_max <- c(50,0.15)}
   if(stomatal_model %in% c("phydro_cmax")){
@@ -303,7 +312,7 @@ error_fun_kmax_alpha = function(x, data, data_template,  plot=F, inst=TRUE,
                                                               jmax = ..2, vcmax = ..3, 
                                                               stomatal_model = stomatal_model)) ) %>% 
         unnest_wider(p)
-
+      }
     if(plot==T) dat1 %>% plot_all(varname = "psi_soil", species=species, data = data, dpsi_data=dpsi_data)
     
     dat2 <- dat1 %>% filter(gs>=1e-40)
@@ -321,6 +330,7 @@ error_fun_kmax_alpha = function(x, data, data_template,  plot=F, inst=TRUE,
     data_f <- data #%>% filter(LWP >= psi88S) #use only values over Psi88S
     y2 = mean((dat1$gs - data_f$gC)^2,na.rm  = TRUE)/mean(data_f$gC,na.rm  = TRUE)^2
     y1 = mean((dat1$a - data_f$A)^2,na.rm  = TRUE)/mean(data_f$A,na.rm  = TRUE)^2
+    y4 = mean((dat1$chi - (data_f$Ciest/data_f$ca))^2,na.rm  = TRUE)/mean((data_f$Ciest/data_f$ca),na.rm  = TRUE)^2
 
     if (dpsi_calib ){
       d_spl = splinefun(lwp, y=dat1$dpsi)
@@ -331,9 +341,9 @@ error_fun_kmax_alpha = function(x, data, data_template,  plot=F, inst=TRUE,
       y3=0
     }
       
-    y=y2+y1
+    y=y2+y1+y4
       
-      cat(x, "|", y2, " / ", y1, " / ", y, "\n")
+      cat(x, "|", y2, " / ", y1, " / ", y4, " / ",y, "\n")
       cat(x, "|", y, "\n")
       
       y
@@ -388,7 +398,7 @@ get_parameters_kmax_alpha <- function(x){
                      K_sperry = K_sperry_acclimate,
                      # method = "L-BFGS-B",
                      control = list(maxit = 500, maximize = TRUE, parscale = c(1,0.01),
-                                    REPORT=0, trace=0)
+                                    REPORT=0, trace=0, reltol=1e-4)
                      ) -> opt_accl
       x_accl <- opt_accl$par
 
@@ -424,12 +434,12 @@ get_parameters_kmax_alpha <- function(x){
 
 ##### COMPUTE PARAMETERS #####
 #First compute sperry model to obtain Kmax for CMAX. CGAIN, WUE and PHYDRO models
-K_sperry <- NULL
-template %>% filter(scheme == "phydro_sperry",dpsi == FALSE) %>%
-  group_split(scheme, dpsi, Species,source) %>%
-  purrr::map_df(get_parameters_kmax_alpha)->res
-
-save(res,file = "DATA/K_sperry_meta-analysis_kmax_alpha_vpd.RData")
+# K_sperry <- NULL
+# template %>% filter(scheme == "phydro_sperry",dpsi == FALSE) %>%
+#   group_split(scheme, dpsi, Species,source) %>%
+#   purrr::map_df(get_parameters_kmax_alpha)->res
+# 
+# save(res,file = "DATA/K_sperry_meta-analysis_kmax_alpha_vpd.RData")
 
 load(file = "DATA/K_sperry_meta-analysis_kmax_alpha_vpd.RData")
 
@@ -440,9 +450,9 @@ K_sperry <- res %>%
 
 #Compute the rest of the models
 template %>% 
-  filter(!scheme %in% c("phydro_sperry"),
+  filter(!scheme %in% c("phydro_sperry","phydro","phydro_cmax","phydro_cgain"),
          dpsi == FALSE) %>%
-  # filter(scheme %in% c("phydro")) %>%
-  filter(Species == "Quercus ilex") %>%
+  # filter(scheme %in% c("phydro_cgain")) %>%
+  # filter(Species == "Quercus ilex", source == "Epron and Dreyer (1990)") %>%
   group_split(scheme, dpsi, Species,source) %>% 
   purrr::map_df(get_parameters_kmax_alpha)

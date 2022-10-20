@@ -15,6 +15,7 @@ library(gridExtra)
 library(scales)
 library(zoo)
 library(stringr)
+library(DEoptim)
 source("stomatal_optimization_functions_phydro_calibration.R")
 source("gs_stomatal_optimization_functions_phydro_calibration.R")
 source('hydraulic_functions.R')
@@ -24,7 +25,7 @@ makeTransparent = function(col, alpha=0.7){
   rgb(t(col2rgb(col)/255), alpha = alpha)
 }
 
-show_col(brewer_pal(palette = "BrBG")(5))
+# show_col(brewer_pal(palette = "BrBG")(5))
 
 mytheme = function(){
   theme_classic()+
@@ -42,6 +43,32 @@ mytheme2 = function(){
           legend.text=element_text(size=10),
           plot.tag.position = "topleft") 
   
+}
+
+get_vcmax_jmax_ww <- function(x){
+  data_ww <- x %>% 
+  filter(!is.na(gC)) %>% 
+  mutate(LWP_q90 = quantile(LWP, 0.9,na.rm = TRUE),
+         ci = ca-A/gC) %>% 
+  filter(LWP>=LWP_q90) %>% 
+  dplyr::select(LWP,A,gC,T,ci,Iabs_growth) %>% 
+  dplyr::summarise_all(mean, na.rm = TRUE)
+
+
+vcmax <- calc_vcmax_no_acclimated_ww(A = data_ww$A,
+                                     ci = data_ww$ci,
+                                     tc = data_ww$T,
+                                     patm = calc_patm(0,data_ww$T),
+                                     rdark = 0.02
+)
+jmax <- calc_jmax_no_acclimated_ww(A = data_ww$A,
+                                   vcmax = vcmax,
+                                   ci = data_ww$ci,
+                                   I = data_ww$Iabs_growth,
+                                   tc = data_ww$T,
+                                   patm = calc_patm(0,data_ww$T),
+                                   kphio = 0.087)
+return(tibble(vcmax_ww = vcmax,jmax_ww = jmax,LWP_ww = data_ww$LWP))
 }
 
 col_df <- tibble(scheme = factor(c(#"phydro_wue",
@@ -93,6 +120,10 @@ df <- df %>%
     !Species %in% c('Betula pendula','Pinus sylvestris')
   )
 
+df_n <- df %>% 
+  group_by(scheme,acclimation,Species,source) %>% 
+  filter(!is.na(A)) %>% 
+  summarise(n_dist = n())
 
 #### PARAMETERS DATA ####
 path_par <- "DATA/parameter_kmax_vpd/"
@@ -136,7 +167,12 @@ par_data_kmax_alpha <- list.files(path_par_kmax_alpha) %>%
     readr::read_csv(paste0(path_par_kmax_alpha,x))
   })
 
+#### CALCULATE WW JMAX AND VCMAX ####
+vcmax_jmax_ww <- df %>% 
+  group_by(scheme,source,Species) %>% 
+  do(get_vcmax_jmax_ww(.))
 
+#### PREPARE KMAX ALPHA DATASET ####
 df_param_kmax_alpha <- par_data_kmax_alpha %>% 
   filter(dpsi == FALSE) %>%
   mutate(stomatal_model = scheme,
@@ -157,21 +193,25 @@ df_param_kmax_alpha <- par_data_kmax_alpha %>%
     # !scheme %in% c('PROFITMAX2net',
     #                     'SOXnet',
     #                     'WUE'),
-    !Species %in% c('Betula pendula','Pinus sylvestris'))
+    !Species %in% c('Betula pendula','Pinus sylvestris'))%>% 
+  left_join(vcmax_jmax_ww)
+
 df_param_kmax_alpha[which(df_param_kmax_alpha$Species %in% 
                  c("Olea europaea var. Chemlali","Olea europaea var. Meski")),
          "Huber.value"] <- olea_hv$Huber.value
 df_param_kmax_alpha[which(df_param_kmax_alpha$Species %in% 
                  c("Olea europaea var. Chemlali","Olea europaea var. Meski")),
          "KL..kg.m.1.MPa.1.s.1."] <- olea_kl$KL..kg.m.1.MPa.1.s.1.
+
 df_param_kmax_alpha <- df_param_kmax_alpha %>% 
   left_join(df %>% 
               select(scheme,source,Species,Iabs_growth,D,T,ca) %>%
               group_by(scheme,source,Species) %>%  
               summarise_all(mean,na.rm=TRUE)
             ) %>% 
+  left_join(df_n) %>% 
   mutate(var = 0,
-         pmod = purrr::pmap(list(var, T,Iabs_growth,D,ca,K.scale,P50,b,alpha,gamma,stomatal_model), 
+         psi0 = purrr::pmap(list(var, T,Iabs_growth,D,ca,K.scale,P50,b,alpha,gamma,stomatal_model), 
                             ~model_numerical(tc =..2, ppfd = ..3, 
                                           vpd = ..4*101325, co2 = ..5, 
                                           elv = 0, fapar = .99, kphio = 0.087, 
@@ -183,14 +223,28 @@ df_param_kmax_alpha <- df_param_kmax_alpha %>%
                                             alpha = ..9,
                                             gamma = ..10
                                           ), stomatal_model = ..11 %>% unique())))%>% 
-  unnest_wider(pmod,names_sep = ".")
-
+  unnest_wider(psi0,names_sep = ".") %>% 
+  mutate(var = LWP_ww,
+         psi_ww = purrr::pmap(list(var, T,Iabs_growth,D,ca,K.scale,P50,b,alpha,gamma,stomatal_model), 
+                            ~model_numerical(tc =..2, ppfd = ..3, 
+                                             vpd = ..4*101325, co2 = ..5, 
+                                             elv = 0, fapar = .99, kphio = 0.087, 
+                                             psi_soil = ..1, rdark = 0.02, 
+                                             par_plant=list(conductivity = ..6*1e-16,
+                                                            psi50 = ..7%>% unique(),
+                                                            b = ..8%>% unique()), 
+                                             par_cost = list(
+                                               alpha = ..9,
+                                               gamma = ..10
+                                             ), stomatal_model = ..11 %>% unique())))%>% 
+  unnest_wider(psi_ww,names_sep = ".")
 
 
 
 
 #### ALPHA ANALYSIS ####
-sla_alpha_mod <- lmerTest::lmer(alpha~SLA..cm2.g.1.+ (1|Species)+ (1|scheme) + (1|source), data = df_param_kmax_alpha)
+sla_alpha_mod <- lmerTest::lmer(alpha~SLA..cm2.g.1.+ (1|Species)+ (1|scheme) + (1|source), 
+                                data = df_param_kmax_alpha)
 anova(sla_alpha_mod)
 sla_alpha <- summary(sla_alpha_mod)$coefficients
 sla_sim <- seq(min(df_param_kmax_alpha$SLA..cm2.g.1.,na.rm = TRUE),
@@ -203,12 +257,12 @@ p1 <- ggplot()+
   stat_summary(data = df_param_kmax_alpha,
                mapping=aes(SLA..cm2.g.1.,alpha,group=interaction(species,source)),fun.data=mean_sdl, fun.args = list(mult=1), 
                geom="pointrange", color="grey20")+
-  geom_line(aes(x = sla_sim, y = alpha_sim_sla),color = "grey20")+
-  geom_line(aes(x = sla_sim, y = alpha_sd_max_sla),color = "grey20",linetype=2)+
-  geom_line(aes(x = sla_sim, y = alpha_sd_min_sla),color = "grey20",linetype=2)+
-  annotate(geom = "text",x=5,y=0.13,hjust=0,vjust=0,label="***",size=6)+
+  # geom_line(aes(x = sla_sim, y = alpha_sim_sla),color = "grey20")+
+  # geom_line(aes(x = sla_sim, y = alpha_sd_max_sla),color = "grey20",linetype=2)+
+  # geom_line(aes(x = sla_sim, y = alpha_sd_min_sla),color = "grey20",linetype=2)+
+  # annotate(geom = "text",x=5,y=0.13,hjust=0,vjust=0,label="***",size=6)+
   mytheme2()+
-  xlab(expression("SLA  (cm"^2~"g"^-1*")"))+
+  xlab(expression("SLA  [cm"^2~"g"^-1*"]"))+
   ylab(expression(alpha))
 
 p50_alpha_mod <- lmerTest::lmer(alpha~P50 + (1|Species)+ (1|scheme) + (1|source), data = df_param_kmax_alpha)
@@ -224,35 +278,35 @@ p2 <- ggplot()+
   stat_summary(data = df_param_kmax_alpha,
                mapping=aes(P50,alpha,group=interaction(species,source)),fun.data=mean_sdl, fun.args = list(mult=1), 
                geom="pointrange", color="grey20")+
-  geom_line(aes(x = p50_sim, y = alpha_sim_p50),color = "grey20")+
-  geom_line(aes(x = p50_sim, y = alpha_sd_max_p50),color = "grey20",linetype=2)+
-  geom_line(aes(x = p50_sim, y = alpha_sd_min_p50),color = "grey20",linetype=2)+
-  annotate(geom = "text",x=-7.5,y=0.13,hjust=0,vjust=0,label="**",size=6)+
+  # geom_line(aes(x = p50_sim, y = alpha_sim_p50),color = "grey20")+
+  # geom_line(aes(x = p50_sim, y = alpha_sd_max_p50),color = "grey20",linetype=2)+
+  # geom_line(aes(x = p50_sim, y = alpha_sd_min_p50),color = "grey20",linetype=2)+
+  # annotate(geom = "text",x=-7.5,y=0.13,hjust=0,vjust=0,label="**",size=6)+
   mytheme2()+
-  xlab(expression(psi[50]~"(MPa)"))+
+  xlab(expression(psi[50]~"[MPa]"))+
   ylab(expression(alpha))
 
 
-hv_alpha_mod <- lmerTest::lmer(alpha~log(Huber.value)+ (1|Species)+ (1|scheme) + (1|source), data = df_param_kmax_alpha)
-anova(hv_alpha_mod)
-hv_alpha <- summary(hv_alpha_mod)$coefficients
-hv_sim <- seq(min(log(df_param_kmax_alpha$Huber.value),na.rm = TRUE),
-               max(log(df_param_kmax_alpha$Huber.value),na.rm = TRUE),
-               0.1)
-alpha_sim_hv<- hv_alpha[1,1]+hv_alpha[2,1]*hv_sim
-alpha_sd_max_hv <- hv_alpha[1,1] + hv_alpha[1,2] + (hv_alpha[2,1]+hv_alpha[2,2])*hv_sim
-alpha_sd_min_hv <- hv_alpha[1,1] - hv_alpha[1,2] + (hv_alpha[2,1]-hv_alpha[2,2])*hv_sim
-p3 <- ggplot()+
-  stat_summary(data = df_param_kmax_alpha,
-               mapping=aes(log(Huber.value),alpha,group=interaction(Species,source)),fun.data=mean_sdl, fun.args = list(mult=1), 
-               geom="pointrange", color="grey20")+
-  geom_line(aes(x = hv_sim, y = alpha_sim_hv),color = "grey20")+
-  geom_line(aes(x = hv_sim, y = alpha_sd_max_hv),color = "grey20",linetype=2)+
-  geom_line(aes(x = hv_sim, y = alpha_sd_min_hv),color = "grey20",linetype=2)+
-  annotate(geom = "text",x=-7,y=0.13,hjust=0,vjust=0,label="*",size=6)+
-  mytheme2()+
-  xlab(expression("Huber value (ln("*cm[sw]^2~m[leaf]^-2*"))"))+
-  ylab(expression(alpha))
+# hv_alpha_mod <- lmerTest::lmer(alpha~log(Huber.value)+ (1|Species)+ (1|scheme) + (1|source), data = df_param_kmax_alpha)
+# anova(hv_alpha_mod)
+# hv_alpha <- summary(hv_alpha_mod)$coefficients
+# hv_sim <- seq(min(log(df_param_kmax_alpha$Huber.value),na.rm = TRUE),
+#                max(log(df_param_kmax_alpha$Huber.value),na.rm = TRUE),
+#                0.1)
+# alpha_sim_hv<- hv_alpha[1,1]+hv_alpha[2,1]*hv_sim
+# alpha_sd_max_hv <- hv_alpha[1,1] + hv_alpha[1,2] + (hv_alpha[2,1]+hv_alpha[2,2])*hv_sim
+# alpha_sd_min_hv <- hv_alpha[1,1] - hv_alpha[1,2] + (hv_alpha[2,1]-hv_alpha[2,2])*hv_sim
+# p3 <- ggplot()+
+#   stat_summary(data = df_param_kmax_alpha,
+#                mapping=aes(log(Huber.value),alpha,group=interaction(Species,source)),fun.data=mean_sdl, fun.args = list(mult=1), 
+#                geom="pointrange", color="grey20")+
+#   geom_line(aes(x = hv_sim, y = alpha_sim_hv),color = "grey20")+
+#   geom_line(aes(x = hv_sim, y = alpha_sd_max_hv),color = "grey20",linetype=2)+
+#   geom_line(aes(x = hv_sim, y = alpha_sd_min_hv),color = "grey20",linetype=2)+
+#   annotate(geom = "text",x=-7,y=0.13,hjust=0,vjust=0,label="*",size=6)+
+#   mytheme2()+
+#   xlab(expression("Huber value (ln("*cm[sw]^2~m[leaf]^-2*"))"))+
+#   ylab(expression(alpha))
 
 k_alpha_mod <- lmerTest::lmer(alpha~log(K.scale)+ (1|Species)+ (1|scheme) + (1|source), data = df_param_kmax_alpha)
 anova(k_alpha_mod) 
@@ -273,11 +327,12 @@ p4 <- ggplot()+
   #                  group=interaction(species,source)),
   #              fun.data=mean_sdl, fun.args = list(mult=1),
   #              geom="pointrange", shape=1)+
-  # geom_line(aes(x = k_sim, y = alpha_sim_k),color = "grey20")+
-  # geom_line(aes(x = k_sim, y = alpha_sd_max_k),color = "grey20",linetype=2)+
-  # geom_line(aes(x = k_sim, y = alpha_sd_min_k),color = "grey20",linetype=2)+
+  geom_line(aes(x = k_sim, y = alpha_sim_k),color = "grey20")+
+  geom_line(aes(x = k_sim, y = alpha_sd_max_k),color = "grey20",linetype=2)+
+  geom_line(aes(x = k_sim, y = alpha_sd_min_k),color = "grey20",linetype=2)+
+  annotate(geom = "text",x=-3.1,y=0.13,hjust=0,vjust=0,label="*",size=6)+
   mytheme2()+
-  xlab(expression(K[leaf]*" (ln("*mol[H2O]~m^-1~MPa^-1~s^-1*"))"))+
+  xlab(expression(K[leaf]*" [ln("*mol[H2O]~m^-1~MPa^-1~s^-1*")]"))+
   ylab(expression(alpha))
 
 b_alpha_mod <- lmerTest::lmer(alpha~log(b) + (1|Species)+ (1|scheme) + (1|source), data = df_param_kmax_alpha)
@@ -289,16 +344,16 @@ b_sim <- seq(min(log(df_param_kmax_alpha$b),na.rm = TRUE),
 alpha_sim_b <- b_alpha[1,1]+b_alpha[2,1]*b_sim
 alpha_sd_max_b <- b_alpha[1,1] + b_alpha[1,2] + (b_alpha[2,1]+b_alpha[2,2])*b_sim
 alpha_sd_min_b <- b_alpha[1,1] - b_alpha[1,2] + (b_alpha[2,1]-b_alpha[2,2])*b_sim
-p5 <- ggplot()+
+p3 <- ggplot()+
   stat_summary(data = df_param_kmax_alpha,
                mapping=aes(log(b),alpha,group=interaction(species,source)),fun.data=mean_sdl, fun.args = list(mult=1),
                geom="pointrange", color="grey20")+
-  geom_line(aes(x = b_sim, y = alpha_sim_b),color = "grey20")+
-  geom_line(aes(x = b_sim, y = alpha_sd_max_b),color = "grey20",linetype=2)+
-  geom_line(aes(x = b_sim, y = alpha_sd_min_b),color = "grey20",linetype=2)+
+  # geom_line(aes(x = b_sim, y = alpha_sim_b),color = "grey20")+
+  # geom_line(aes(x = b_sim, y = alpha_sd_max_b),color = "grey20",linetype=2)+
+  # geom_line(aes(x = b_sim, y = alpha_sd_min_b),color = "grey20",linetype=2)+
   # annotate(geom = "text",x=0.1,y=0.13,hjust=0,vjust=0,label="***",size=6)+
   mytheme2()+
-  xlab(expression("b"))+
+  xlab(expression("ln(b)"))+
   ylab(expression(alpha))
 
 
@@ -311,45 +366,115 @@ Iabs_sim <- seq(min(df_param_kmax_alpha$Iabs_growth,na.rm = TRUE),
 alpha_sim_Iabs <- Iabs_alpha[1,1]+Iabs_alpha[2,1]*Iabs_sim
 alpha_sd_max_Iabs <- Iabs_alpha[1,1] + Iabs_alpha[1,2] + (Iabs_alpha[2,1]+Iabs_alpha[2,2])*Iabs_sim
 alpha_sd_min_Iabs <- Iabs_alpha[1,1] - Iabs_alpha[1,2] + (Iabs_alpha[2,1]-Iabs_alpha[2,2])*Iabs_sim
-p6 <- ggplot()+
+p5 <- ggplot()+
   stat_summary(data = df_param_kmax_alpha,
                mapping=aes(Iabs_growth,alpha,group=interaction(species,source)),fun.data=mean_sdl, fun.args = list(mult=1),
                geom="pointrange", color="grey20")+
-  geom_line(aes(x = Iabs_sim, y = alpha_sim_Iabs),color = "grey20")+
-  geom_line(aes(x = Iabs_sim, y = alpha_sd_max_Iabs),color = "grey20",linetype=2)+
-  geom_line(aes(x = Iabs_sim, y = alpha_sd_min_Iabs),color = "grey20",linetype=2)+
+  # geom_line(aes(x = Iabs_sim, y = alpha_sim_Iabs),color = "grey20")+
+  # geom_line(aes(x = Iabs_sim, y = alpha_sd_max_Iabs),color = "grey20",linetype=2)+
+  # geom_line(aes(x = Iabs_sim, y = alpha_sd_min_Iabs),color = "grey20",linetype=2)+
   # annotate(geom = "text",x=0.1,y=0.13,hjust=0,vjust=0,label="***",size=6)+
   mytheme2()+
-  xlab(expression(I[growth]~"("*mu*"mol"~m^-2~s^-1*")"))+
+  xlab(expression(I[growth]~"["*mu*"mol"~m^-2~s^-1*"]"))+
   ylab(expression(alpha))
 
 
-sla_jmax0_mod <- lmerTest::lmer(pmod.jmax~SLA..cm2.g.1.+ (1|Species)+ (1|scheme) + (1|source), data = df_param_kmax_alpha)
-anova(sla_jmax0_mod)
-sla_alpha <- summary(sla_jmax0_mod)
+# sla_jmax0_mod <- lmerTest::lmer(pmod.jmax~SLA..cm2.g.1.+ (1|Species)+ (1|scheme) + (1|source), data = df_param_kmax_alpha)
+# anova(sla_jmax0_mod)
+# sla_alpha <- summary(sla_jmax0_mod)
+# 
+# I_jmax0_mod <- lmerTest::lmer(pmod.jmax~Iabs_growth+ (1|Species)+ (1|scheme) + (1|source), data = df_param_kmax_alpha)
+# anova(I_jmax0_mod)
+# summary(I_jmax0_mod)
 
-I_jmax0_mod <- lmerTest::lmer(pmod.jmax~Iabs_growth+ (1|Species)+ (1|scheme) + (1|source), data = df_param_kmax_alpha)
-anova(I_jmax0_mod)
-summary(I_jmax0_mod)
+jmax0_alpha_mod <- lmerTest::lmer(alpha~log(psi0.jmax)+ (1|Species)+ (1|scheme) + (1|source), data = df_param_kmax_alpha)
+anova(jmax0_alpha_mod)
+summary(jmax0_alpha_mod)
+jmax0_alpha <- summary(jmax0_alpha_mod)$coefficients
+jmax0_sim <- seq(min(log(df_param_kmax_alpha$psi0.jmax),na.rm = TRUE),
+                max(log(df_param_kmax_alpha$psi0.jmax),na.rm = TRUE),
+                0.01)
+alpha_sim_jmax0 <- jmax0_alpha[1,1]+jmax0_alpha[2,1]*jmax0_sim
+alpha_sd_max_jmax0 <- jmax0_alpha[1,1] + jmax0_alpha[1,2] + (jmax0_alpha[2,1]+jmax0_alpha[2,2])*jmax0_sim
+alpha_sd_min_jmax0 <- jmax0_alpha[1,1] - jmax0_alpha[1,2] + (jmax0_alpha[2,1]-jmax0_alpha[2,2])*jmax0_sim
+p6 <- ggplot()+
+  stat_summary(data = df_param_kmax_alpha,
+               mapping=aes(log(psi0.jmax),alpha,group=interaction(species,source)),fun.data=mean_sdl, fun.args = list(mult=1),
+               geom="pointrange", color="grey20")+
+  geom_line(aes(x = jmax0_sim, y = alpha_sim_jmax0),color = "grey20")+
+  geom_line(aes(x = jmax0_sim, y = alpha_sd_max_jmax0),color = "grey20",linetype=2)+
+  geom_line(aes(x = jmax0_sim, y = alpha_sd_min_jmax0),color = "grey20",linetype=2)+
+  annotate(geom = "text",x=3,y=0.155,hjust=0,vjust=0,label="***",size=6)+
+  # stat_summary(data = df_param_kmax_alpha,
+  #              mapping=aes(log(jmax_ww),alpha,group=interaction(species,source)),fun.data=mean_sdl, fun.args = list(mult=1),
+  # geom="pointrange", color="blue")+
+  mytheme2()+
+  xlab(expression(J[max0]~"[ln("*mu*"mol"~m^-2~s^-1*")]"))+
+  ylab(expression(alpha))
 
-alpha_jmax0_mod <- lmerTest::lmer(pmod.jmax~alpha+ (1|Species)+ (1|scheme) + (1|source), data = df_param_kmax_alpha)
-anova(alpha_jmax0_mod)
-summary(alpha_jmax0_mod)
+ggplot(data = df_param_kmax_alpha,
+       mapping=aes(psi0.jmax,jmax_ww,color=scheme))+
+  geom_point()+
+  geom_abline(slope=1,intercept=0,color="grey20", linetype=2)+
+  geom_smooth(method="lm",se=FALSE)+
+  # geom_line(aes(x = jmax0_sim, y = alpha_sim_jmax0),color = "grey20")+
+  # geom_line(aes(x = jmax0_sim, y = alpha_sd_max_jmax0),color = "grey20",linetype=2)+
+  # geom_line(aes(x = jmax0_sim, y = alpha_sd_min_jmax0),color = "grey20",linetype=2)+
+  # annotate(geom = "text",x=3,y=0.155,hjust=0,vjust=0,label="***",size=6)+
+  # stat_summary(data = df_param_kmax_alpha,
+  #              mapping=aes(log(vcmax_ww),alpha,group=interaction(species,source)),fun.data=mean_sdl, fun.args = list(mult=1),
+  #              geom="pointrange", color="blue")+
+  mytheme2()+
+  scale_colour_manual(breaks = col_df$scheme, 
+                      values = unique(as.character(col_df$col)))+
+  theme(legend.title = element_blank())+
+  xlab(expression("Modelled"~J[max0]~"[ln("*mu*"mol"~m^-2~s^-1*")]"))+
+  ylab(expression("Actual"~J[maxWW]~"[ln("*mu*"mol"~m^-2~s^-1*")]"))
 
-ggarrange(p1,p2,p3,p4, 
-          align='hv', labels=c('a', 'b','c','d'),
-          ncol=2, nrow = 2)
+ggplot(data = df_param_kmax_alpha,
+       mapping=aes(psi_ww.jmax,jmax_ww,color=scheme))+
+  geom_point()+
+  geom_abline(slope=1,intercept=0,color="grey20", linetype=2)+
+  geom_smooth(method="lm",se = FALSE)+
+  # geom_line(aes(x = jmax0_sim, y = alpha_sim_jmax0),color = "grey20")+
+  # geom_line(aes(x = jmax0_sim, y = alpha_sd_max_jmax0),color = "grey20",linetype=2)+
+  # geom_line(aes(x = jmax0_sim, y = alpha_sd_min_jmax0),color = "grey20",linetype=2)+
+  # annotate(geom = "text",x=3,y=0.155,hjust=0,vjust=0,label="***",size=6)+
+  # stat_summary(data = df_param_kmax_alpha,
+  #              mapping=aes(log(vcmax_ww),alpha,group=interaction(species,source)),fun.data=mean_sdl, fun.args = list(mult=1),
+  #              geom="pointrange", color="blue")+
+  mytheme2()+
+  scale_colour_manual(breaks = col_df$scheme, 
+                      values = unique(as.character(col_df$col)))+
+  theme(legend.title = element_blank())+
+  xlab(expression("Modelled"~J[maxWW]~"[ln("*mu*"mol"~m^-2~s^-1*")]"))+
+  ylab(expression("Actual"~J[maxWW]~"[ln("*mu*"mol"~m^-2~s^-1*")]"))
 
-alpha_mod <- lmerTest::lmer(alpha~ SLA..cm2.g.1.+Iabs_growth+D+ l_b + lk.scale+P50 + (1|Species)+ (1|scheme)+ (1|source), 
+
+ggarrange(p1,p2,p3,p4,p5,p6,
+          align='hv', labels=c('a', 'b','c','d','e','f'),
+          ncol=2, nrow = 3)
+
+library(psych)
+pairs.panels(df_param_kmax_alpha %>%
+        mutate(KL = log(KL..kg.m.1.MPa.1.s.1.*55.5),
+               hv = log(Huber.value),
+               lk.scale =log(K.scale),
+               l_b = log(b),
+               D = D*101325/1000) %>% 
+        select(SLA..cm2.g.1.,Iabs_growth,D, l_b , lk.scale,P50,hv))
+alpha_mod <- lmerTest::lmer(alpha~ SLA..cm2.g.1.+Iabs_growth+ l_b +P50 + (1|Species)+ (1|scheme)+ (1|source), 
                             data = df_param_kmax_alpha %>%
                               mutate(KL = log(KL..kg.m.1.MPa.1.s.1.*55.5),
                             hv = log(Huber.value),
-                            lk.scale =log(K.scale),l_b = log(b))
+                            lk.scale =log(K.scale),
+                            l_b = log(b),
+                            D = D*101325/1000)
                             )
 summary(alpha_mod)
 step(alpha_mod)
 alpha_mod <- lmerTest::lmer(#alpha~ SLA..cm2.g.1.+D+ l_b + lk.scale+P50 + (1|scheme)+ (1|source), 
-                            alpha ~ SLA..cm2.g.1. + Iabs_growth + l_b + (1 | Species) + (1 | scheme),
+                            alpha ~ Iabs_growth+ l_b + P50 + (1 | Species) + (1 | scheme),
                             data = df_param_kmax_alpha %>%
                               mutate(KL = log(KL..kg.m.1.MPa.1.s.1.*55.5),
                                      hv = log(Huber.value),
@@ -358,22 +483,55 @@ alpha_mod <- lmerTest::lmer(#alpha~ SLA..cm2.g.1.+D+ l_b + lk.scale+P50 + (1|sch
 summary(alpha_mod)
 MuMIn::r.squaredGLMM(alpha_mod)
 
-# library("factoextra")
-# df_k_a_pca <- df_param_kmax_alpha %>% 
-#   select(alpha,Huber.value,SLA..cm2.g.1.,K.scale,P50,b) %>% 
-#   drop_na 
-# res.pca <- prcomp(df_k_a_pca, scale = TRUE)
-# fviz_eig(res.pca)
-# fviz_pca_ind(res.pca,
-#              col.ind = "cos2", # Color by the quality of representation
-#              gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
-#              repel = TRUE     # Avoid text overlapping
-# )
-# fviz_pca_var(res.pca,
-#              col.var = "contrib", # Color by contributions to the PC
-#              gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
-#              repel = TRUE     # Avoid text overlapping
-# )
+
+
+alpha_scheme <- lmerTest::lmer(alpha~ scheme + (1|Species)+ (1|source), 
+                              data = df_param_kmax_alpha )
+summary(alpha_scheme)
+emmeans::contrast(emmeans(alpha_scheme, "scheme"),'tukey') %>%
+  summary() %>% 
+  broom::tidy()
+
+emmeans(alpha_scheme, "scheme") %>%
+  summary() %>% 
+  broom::tidy() %>% 
+  ggplot(aes(scheme, estimate, ymin=conf.low, ymax=conf.high)) +
+  geom_pointrange() +
+  ylab(expression(alpha)) +
+  xlab("")+
+  coord_flip()
+
+
+
+
+
+
+
+
+
+
+
+library("factoextra")
+df_k_a_pca <- df_param_kmax_alpha%>% filter(scheme=="PROFITMAX") %>% 
+  mutate(KL = log(KL..kg.m.1.MPa.1.s.1.*55.5),
+         hv = log(Huber.value),
+         lk.scale =log(K.scale),
+         l_b = log(b),
+         D = D*101325/1000) %>% 
+  select(alpha,T, ca,Height.max..m.,SLA..cm2.g.1.,Iabs_growth,D, l_b , lk.scale,P50,hv)%>%
+  drop_na
+res.pca <- prcomp(df_k_a_pca, scale = TRUE)
+fviz_eig(res.pca)
+fviz_pca_ind(res.pca,
+             col.ind = "cos2", # Color by the quality of representation
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE     # Avoid text overlapping
+)
+fviz_pca_var(res.pca,
+             col.var = "contrib", # Color by contributions to the PC
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE     # Avoid text overlapping
+)
 # 
 # groups <- df_param_kmax_alpha %>% 
 #   select(Species,alpha,Huber.value,SLA..cm2.g.1.,K.scale,P50,b) %>% 
@@ -580,7 +738,7 @@ p3 <- df_a %>%
   ylab(expression("Assimilation rate RMSE  ("*mu*"mol m"^-2~"s"^-1*")"))+
   scale_color_manual(values = c("#A6611A","#018571"))+
   scale_fill_manual(values =c("#DFC27D","#80CDC1"))+
-  scale_shape_manual(values = c(19))+ #since all the pairs have significant difference, select only sig shape
+  scale_shape_manual(values = c(1,19))+ #since all the pairs have significant difference, select only sig shape
   coord_flip()
 
 bias_a <- lmerTest::lmer(bias~scheme*acclimation + (1|Species), data = df_a, weights = n_dist
